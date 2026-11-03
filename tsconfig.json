@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/ai" },
+    { "path": "./packages/agent" },
+    { "path": "./packages/tui" },
+    { "path": "./packages/coding-agent" }
+  ]
+}

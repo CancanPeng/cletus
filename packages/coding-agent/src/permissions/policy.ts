@@ -1,0 +1,144 @@
+import { matchesGlob } from "node:path";
+import { resolveRead, resolveWrite, type SandboxOptions } from "./sandbox.js";
+
+export type PermissionRequest = {
+  toolName: string;
+  args: Record<string, unknown>;
+  summary: string;
+};
+export type PermissionDecision = "allow" | "session" | "deny";
+export type ConfirmFn = (req: PermissionRequest) => Promise<PermissionDecision>;
+
+const READ_TOOLS: Record<string, true> = {
+  read: true,
+  grep: true,
+  find: true,
+  ls: true,
+};
+
+export class PermissionPolicy {
+  private readonly sandbox: SandboxOptions;
+  private readonly allowWrite: string[];
+  readonly yolo: boolean;
+  private readonly interactive: boolean;
+  private readonly confirm: ConfirmFn | undefined;
+  private readonly sessionPaths = new Set<string>();
+  private readonly sessionCommands = new Set<string>();
+  private readonly sessionMcpTools = new Set<string>();
+
+  constructor(opts: {
+    cwd: string;
+    readOnlyRoots: string[];
+    allowWrite: string[];
+    yolo: boolean;
+    interactive: boolean;
+    confirm?: ConfirmFn;
+  }) {
+    this.sandbox = { cwd: opts.cwd, readOnlyRoots: opts.readOnlyRoots };
+    this.allowWrite = opts.allowWrite.map((pattern) =>
+      pattern.startsWith("/") ? pattern : `${opts.cwd}/${pattern}`,
+    );
+    this.yolo = opts.yolo;
+    this.interactive = opts.interactive;
+    this.confirm = opts.confirm;
+  }
+
+  resolveRead(input: string): Promise<string> {
+    return resolveRead(this.sandbox, input);
+  }
+
+  resolveWrite(input: string): Promise<string> {
+    return resolveWrite(this.sandbox, input);
+  }
+
+  private isWriteAllowed(path: string): boolean {
+    if (this.sessionPaths.has(path)) return true;
+    return this.allowWrite.some((pattern) => {
+      try {
+        return matchesGlob(path, pattern);
+      } catch {
+        return path.startsWith(pattern);
+      }
+    });
+  }
+
+  private async ask(
+    toolName: string,
+    args: Record<string, unknown>,
+    summary: string,
+    sessionKey: string,
+  ): Promise<{ allow: boolean; reason?: string }> {
+    if (!this.interactive || !this.confirm) {
+      return { allow: false, reason: "Non-interactive mode requires --yolo for write" };
+    }
+    const decision = await this.confirm({ toolName, args, summary });
+    if (decision === "deny") return { allow: false, reason: "Denied by user" };
+    if (decision === "session") this.sessionCommands.add(sessionKey);
+    return { allow: true };
+  }
+
+  async check(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<{ allow: boolean; reason?: string }> {
+    if (READ_TOOLS[toolName]) {
+      const input = typeof args["path"] === "string" ? args["path"] : ".";
+      try {
+        await this.resolveRead(input);
+        return { allow: true };
+      } catch (error) {
+        return { allow: false, reason: error instanceof Error ? error.message : String(error) };
+      }
+    }
+
+    if (toolName === "write" || toolName === "edit") {
+      const input = typeof args["path"] === "string" ? args["path"] : "";
+      let resolved: string;
+      try {
+        resolved = await this.resolveWrite(input);
+      } catch (error) {
+        return { allow: false, reason: error instanceof Error ? error.message : String(error) };
+      }
+      if (this.isWriteAllowed(resolved)) return { allow: true };
+      if (this.yolo) return { allow: true };
+      if (!this.interactive) {
+        return { allow: false, reason: "Non-interactive mode requires --yolo for write" };
+      }
+      const summary =
+        toolName === "write"
+          ? `Write ${resolved} (${Buffer.byteLength(String(args["content"] ?? ""))} bytes)`
+          : `Edit ${resolved} (${Array.isArray(args["edits"]) ? args["edits"].length : 0} edits)`;
+      if (this.sessionPaths.has(resolved)) return { allow: true };
+      const decision = await this.ask(toolName, args, summary, resolved);
+      if (decision.allow) this.sessionPaths.add(resolved);
+      return decision;
+    }
+
+    if (toolName.startsWith("mcp__")) {
+      if (this.yolo) return { allow: true };
+      if (this.sessionMcpTools.has(toolName)) return { allow: true };
+      if (!this.interactive) {
+        return { allow: false, reason: "Non-interactive mode requires --yolo for write" };
+      }
+      const decision = await this.ask(toolName, args, `MCP tool ${toolName}`, toolName);
+      if (decision.allow) this.sessionMcpTools.add(toolName);
+      return decision;
+    }
+
+    if (toolName === "task") return { allow: true };
+
+    if (toolName === "bash") {
+      if (this.yolo) return { allow: true };
+      const command = String(args["command"] ?? "");
+      if (this.sessionCommands.has(command)) return { allow: true };
+      if (!this.interactive) {
+        return { allow: false, reason: "Non-interactive mode requires --yolo for write" };
+      }
+      const decision = await this.ask(toolName, args, command, command);
+      if (decision.allow) this.sessionCommands.add(command);
+      return decision;
+    }
+
+    return { allow: false, reason: `Unknown tool: ${toolName}` };
+  }
+}
