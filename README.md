@@ -10,7 +10,7 @@ npm i -g cletus
 npx cletus
 ```
 
-Requires Node >= 22.19 on macOS or Linux.
+Requires Node >= 26.4 on macOS or Linux. The TUI uses OpenTUI, which needs the FFI flag; the installed `cletus` shebang adds it automatically. When running the build directly, use `node --experimental-ffi packages/coding-agent/dist/cli.js`.
 
 ## First run
 
@@ -26,6 +26,8 @@ Start the TUI:
 
 ```bash
 cletus
+# direct build:
+node --experimental-ffi packages/coding-agent/dist/cli.js
 ```
 
 Or run once:

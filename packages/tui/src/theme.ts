@@ -13,58 +13,63 @@ export type ThemeToken =
 
 export type Theme = {
   name: "dark" | "light" | "tokyo-night";
-  style: (token: ThemeToken, text: string) => string;
+  background: string;
+  colors: Record<ThemeToken, string>;
 };
 
-const PALETTES: Record<Theme["name"], Record<ThemeToken, number>> = {
+const THEMES: Record<Theme["name"], Omit<Theme, "name">> = {
   dark: {
-    fg: 252,
-    muted: 244,
-    border: 238,
-    accent: 39,
-    success: 40,
-    warning: 214,
-    error: 196,
-    user: 75,
-    assistant: 252,
-    tool: 180,
-    code: 180,
+    background: "#16161e",
+    colors: {
+      fg: "#c0caf5",
+      muted: "#565f89",
+      border: "#3b4261",
+      accent: "#7aa2f7",
+      success: "#9ece6a",
+      warning: "#e0af68",
+      error: "#f7768e",
+      user: "#7dcfff",
+      assistant: "#c0caf5",
+      tool: "#bb9af7",
+      code: "#ff9e64",
+    },
   },
   light: {
-    fg: 235,
-    muted: 245,
-    border: 250,
-    accent: 25,
-    success: 28,
-    warning: 130,
-    error: 160,
-    user: 25,
-    assistant: 235,
-    tool: 94,
-    code: 94,
+    background: "#f7f7fb",
+    colors: {
+      fg: "#1f2335",
+      muted: "#6b7089",
+      border: "#d0d5e3",
+      accent: "#2e7de9",
+      success: "#587539",
+      warning: "#8c6c3e",
+      error: "#b5294d",
+      user: "#007197",
+      assistant: "#1f2335",
+      tool: "#6c4bb6",
+      code: "#965027",
+    },
   },
   "tokyo-night": {
-    fg: 189,
-    muted: 103,
-    border: 60,
-    accent: 111,
-    success: 120,
-    warning: 179,
-    error: 203,
-    user: 117,
-    assistant: 189,
-    tool: 141,
-    code: 141,
+    background: "#1a1b26",
+    colors: {
+      fg: "#c0caf5",
+      muted: "#565f89",
+      border: "#414868",
+      accent: "#7aa2f7",
+      success: "#9ece6a",
+      warning: "#e0af68",
+      error: "#f7768e",
+      user: "#7dcfff",
+      assistant: "#c0caf5",
+      tool: "#bb9af7",
+      code: "#ff9e64",
+    },
   },
 };
 
 export function getTheme(name: string): Theme {
-  const key = name in PALETTES ? (name as Theme["name"]) : "dark";
+  const key = name in THEMES ? (name as Theme["name"]) : "dark";
   if (key !== name) process.stderr.write(`Warning: unknown theme ${name}; using dark\n`);
-  const palette = PALETTES[key];
-  return {
-    name: key,
-    style: (token, text) =>
-      text.length === 0 ? "" : `\x1b[38;5;${palette[token]}m${text}\x1b[0m`,
-  };
+  return { name: key, ...THEMES[key] };
 }

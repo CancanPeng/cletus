@@ -51,6 +51,12 @@ export class PermissionPolicy {
     this.sandbox.readOnlyRoots = roots;
   }
 
+  resetSession(): void {
+    this.sessionPaths.clear();
+    this.sessionCommands.clear();
+    this.sessionMcpTools.clear();
+  }
+
   resolveWrite(input: string): Promise<string> {
     return resolveWrite(this.sandbox, input);
   }

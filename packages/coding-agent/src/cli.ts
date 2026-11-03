@@ -1,18 +1,12 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --disable-warning=ExperimentalWarning --experimental-ffi
 import { access, readFile, mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import type { AgentEvent, AgentMessage } from "@cletus/agent";
 import type { Model } from "@cletus/ai";
-import {
-  ProcessTerminal,
-  TuiApp,
-  getTheme,
-  KeybindingsManager,
-  type SlashCommand,
-  type TranscriptBlock,
-} from "@cletus/tui";
+import type { TuiApp as TuiAppType, SlashCommand } from "@cletus/tui";
 import {
   ConfigError,
   authPath,
@@ -143,7 +137,9 @@ async function decideTrust(
 }
 
 function headerFor(cwd: string, session: AgentSession): string {
-  return `cletus · ${session.model.ref ?? `${session.model.provider}/${session.model.id}`} · ${cwd} · ${session.manager.sessionId}`;
+  const home = homedir();
+  const shortCwd = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
+  return `cletus · ${session.model.ref ?? `${session.model.provider}/${session.model.id}`} · ${shortCwd} · ${session.manager.sessionId.slice(0, 8)}`;
 }
 
 function eventText(message: AgentMessage): string {
@@ -195,7 +191,8 @@ async function runTui(opts: {
   extensions: ExtensionHost;
   yolo: boolean;
 }): Promise<number> {
-  let app: TuiApp | undefined;
+  const { TuiApp, getTheme, KeybindingsManager } = await import("@cletus/tui");
+  let app: TuiAppType | undefined;
   let session: AgentSession | undefined;
   let unsubscribe: (() => void) | undefined;
   let assistantId: string | undefined;
@@ -278,6 +275,7 @@ async function runTui(opts: {
   };
 
   const attach = async (manager: SessionManager): Promise<void> => {
+    policy.resetSession();
     if (session) {
       unsubscribe?.();
       await session.dispose();
@@ -462,8 +460,7 @@ async function runTui(opts: {
 
   const done = Promise.withResolvers<void>();
   const keybindings = new KeybindingsManager(opts.config.tui.keybindings);
-  const terminal = new ProcessTerminal();
-  app = new TuiApp(terminal, {
+  app = new TuiApp({
     header: "cletus",
     theme: getTheme(opts.config.tui.theme),
     keybindings,
@@ -492,14 +489,13 @@ async function runTui(opts: {
     },
     followUp: (text) => session?.followUp(text),
     abort: () => session?.abort(),
-    confirm: async () => "deny",
     commands,
     history: [],
     onExit: () => done.resolve(),
   });
 
   await attach(opts.manager);
-  app.start();
+  await app.start();
   await done.promise;
   unsubscribe?.();
   await session?.dispose();

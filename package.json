@@ -4,13 +4,13 @@
   "type": "module",
   "packageManager": "pnpm@9.15.9",
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=26.4.0"
   },
   "scripts": {
     "build": "tsc -b && node scripts/bundle.mjs",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run",
-    "dev": "pnpm build && node packages/coding-agent/dist/cli.js",
+    "test": "NODE_OPTIONS=--experimental-ffi vitest run",
+    "dev": "pnpm build && node --experimental-ffi packages/coding-agent/dist/cli.js",
     "prepublishOnly": "pnpm build"
   },
   "devDependencies": {

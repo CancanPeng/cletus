@@ -23,9 +23,6 @@ const server = http.createServer((req, res) => {
     const lastUser = [...messages].reverse().find((message) => message.role === "user");
     const text = String(lastUser?.content ?? "");
     const hasToolResult = messages.some((message) => message.role === "tool");
-    const lastMessage = messages[messages.length - 1];
-    const toolDenied =
-      lastMessage?.role === "tool" && /denied|blocked/i.test(String(lastMessage.content ?? ""));
 
     res.writeHead(200, {
       "content-type": "text/event-stream",
@@ -39,7 +36,7 @@ const server = http.createServer((req, res) => {
     };
 
     if (/create hello\.txt/i.test(text)) {
-      if (!hasToolResult || toolDenied) {
+      if (!hasToolResult) {
         await write({
           choices: [
             {
@@ -85,6 +82,14 @@ const server = http.createServer((req, res) => {
           usage: { prompt_tokens: 30, completion_tokens: 6, total_tokens: 36 },
         });
       }
+    } else if (/markdown/i.test(text)) {
+      await write({
+        choices: [{ index: 0, delta: { role: "assistant", content: "# Heading\n\n**bold** and `code`\n\n- one\n- two" }, finish_reason: null }],
+      });
+      await write({
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        usage: { prompt_tokens: 5, completion_tokens: 12, total_tokens: 17 },
+      });
     } else if (/hello/i.test(text)) {
       await write({
         choices: [{ index: 0, delta: { role: "assistant", content: "Hello from cletus." }, finish_reason: null }],

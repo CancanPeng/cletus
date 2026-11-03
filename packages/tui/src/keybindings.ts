@@ -1,5 +1,3 @@
-import { keyId, type Key } from "./keys.js";
-
 export type Action =
   | "submit"
   | "newline"
@@ -38,16 +36,32 @@ const DEFAULTS: Record<Action, string[]> = {
 };
 
 const ALIASES: Record<string, string> = {
-  pageup: "pgup",
-  pagedown: "pgdown",
   return: "enter",
   escape: "esc",
+  pageup: "pgup",
+  pagedown: "pgdown",
   "ctrl+return": "ctrl+enter",
+};
+
+export type KeyLike = {
+  name: string;
+  ctrl?: boolean;
+  shift?: boolean;
+  meta?: boolean;
+  option?: boolean;
 };
 
 function normalize(binding: string): string {
   const lower = binding.trim().toLowerCase().replace(/\s+/g, "");
   return ALIASES[lower] ?? lower;
+}
+
+function keyId(key: KeyLike): string {
+  const name = ALIASES[key.name.toLowerCase()] ?? key.name.toLowerCase();
+  if (key.ctrl) return `ctrl+${name}`;
+  if (key.meta || key.option) return `alt+${name}`;
+  if (key.shift) return `shift+${name}`;
+  return name;
 }
 
 export class KeybindingsManager {
@@ -72,18 +86,15 @@ export class KeybindingsManager {
       }
       this.bindings.set(action, list);
     }
-    const conflicts = this.conflicts();
-    if (conflicts.length > 0) {
-      const first = conflicts[0];
-      if (first) {
-        throw new Error(
-          `Keybinding conflict: ${first.key} is bound to ${first.actions[0]} and ${first.actions[1]}`,
-        );
-      }
+    const conflict = this.conflicts()[0];
+    if (conflict) {
+      throw new Error(
+        `Keybinding conflict: ${conflict.key} is bound to ${conflict.actions[0]} and ${conflict.actions[1]}`,
+      );
     }
   }
 
-  matches(key: Key, action: Action): boolean {
+  matches(key: KeyLike, action: Action): boolean {
     return this.get(action).includes(keyId(key));
   }
 
