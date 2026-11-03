@@ -79,6 +79,7 @@ export class AgentSession {
     const manager = options.sessionManager ?? (await SessionManager.create(options.cwd));
     const session = new AgentSession(options, manager);
     session.resources = await options.resources.load();
+    options.permissions.setReadOnlyRoots(session.resources.readOnlyRoots);
     const projection = buildProjection(manager);
     let model = options.model;
     const branch = manager.getBranch();
@@ -225,6 +226,7 @@ export class AgentSession {
     model: Model;
   }): Promise<{ systemPrompt: string; messages: AgentMessage[] }> {
     this.resources = await this.options.resources.load();
+    this.options.permissions.setReadOnlyRoots(this.resources.readOnlyRoots);
     this.systemPrompt = buildSystemPrompt({
       cwd: this.options.cwd,
       tools: ctx.tools,
@@ -316,6 +318,7 @@ export class AgentSession {
     await this.options.extensions?.reload();
     await this.options.mcp?.reload();
     this.resources = await this.options.resources.load();
+    this.options.permissions.setReadOnlyRoots(this.resources.readOnlyRoots);
     this.refreshTools();
   }
 

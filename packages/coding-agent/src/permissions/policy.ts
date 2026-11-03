@@ -47,6 +47,10 @@ export class PermissionPolicy {
     return resolveRead(this.sandbox, input);
   }
 
+  setReadOnlyRoots(roots: string[]): void {
+    this.sandbox.readOnlyRoots = roots;
+  }
+
   resolveWrite(input: string): Promise<string> {
     return resolveWrite(this.sandbox, input);
   }
