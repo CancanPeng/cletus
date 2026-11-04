@@ -87,6 +87,10 @@ export class TuiApp {
   private footerText: TextRenderable | undefined;
   private modalBox: BoxRenderable | undefined;
   private selectBox: BoxRenderable | undefined;
+  private completionBox: BoxRenderable | undefined;
+  private completionRows: TextRenderable[] = [];
+  private completionItems: SlashCommand[] = [];
+  private completionIndex = 0;
   private syntaxStyle: SyntaxStyle | undefined;
   private theme: Theme;
   private header: string;
@@ -99,7 +103,6 @@ export class TuiApp {
   private modal: ModalState | undefined;
   private selectState: SelectState | undefined;
   private historyIndex = 0;
-  private completionIndex = 0;
   private expandedAll = false;
   private started = false;
   private stopped = false;
@@ -195,6 +198,7 @@ export class TuiApp {
       cursorColor: this.theme.colors.accent,
       keyBindings: [{ name: "return", shift: true, action: "newline" }],
       onSubmit: () => this.onTextareaSubmit(),
+      onContentChange: () => this.updateCompletion(),
     });
     this.editorBox.add(this.textarea);
     this.root.add(this.editorBox);
@@ -219,6 +223,7 @@ export class TuiApp {
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
+    this.hideCompletion();
     clearInterval(this.spinnerTimer);
     this.spinnerTimer = undefined;
     this.modal?.resolve("deny");
@@ -271,6 +276,11 @@ export class TuiApp {
     if (this.headerText) this.headerText.fg = theme.colors.accent;
     if (this.headerBox) this.headerBox.backgroundColor = theme.background;
     if (this.footerText) this.footerText.fg = theme.colors.muted;
+    if (this.completionBox) {
+      this.completionBox.backgroundColor = theme.background;
+      this.completionBox.borderColor = theme.colors.border;
+    }
+    if (this.completionItems.length > 0) this.renderCompletion();
     if (this.editorBox) {
       this.editorBox.backgroundColor = theme.background;
       this.editorBox.borderColor = theme.colors.border;
@@ -312,6 +322,7 @@ export class TuiApp {
   }
 
   confirm(title: string, message: string): Promise<"allow" | "session" | "deny"> {
+    this.hideCompletion();
     this.modal?.resolve("deny");
     const state = Promise.withResolvers<"allow" | "session" | "deny">();
     this.modal = { title, message, resolve: state.resolve };
@@ -327,6 +338,7 @@ export class TuiApp {
       this.notify("Nothing to select", "warn");
       return Promise.resolve(undefined);
     }
+    this.hideCompletion();
     this.selectState?.resolve(undefined);
     const state = Promise.withResolvers<string | undefined>();
     this.selectState = { title, items, index: 0, resolve: state.resolve };
@@ -531,8 +543,31 @@ export class TuiApp {
       this.toggleToolOutput();
       return;
     }
+    if (this.completionVisible()) {
+      if (key.name === "up") {
+        this.intercept(key);
+        this.completionIndex =
+          (this.completionIndex - 1 + this.completionItems.length) % this.completionItems.length;
+        this.renderCompletion();
+        return;
+      }
+      if (key.name === "down") {
+        this.intercept(key);
+        this.completionIndex = (this.completionIndex + 1) % this.completionItems.length;
+        this.renderCompletion();
+        return;
+      }
+      if (key.name === "escape") {
+        this.intercept(key);
+        this.hideCompletion();
+        return;
+      }
+    }
     if (bindings.matches(key, "complete")) {
-      if (this.completeCommand()) this.intercept(key);
+      if (this.completionVisible()) {
+        this.intercept(key);
+        this.acceptCompletion();
+      } else if (this.completeCommand()) this.intercept(key);
       return;
     }
     if (bindings.matches(key, "historyPrev")) {
@@ -552,6 +587,18 @@ export class TuiApp {
       }
     }
     if (key.name === "return" && !key.shift && !key.ctrl && !key.meta && !key.option) {
+      if (this.completionVisible()) {
+        this.intercept(key);
+        const selected = this.completionItems[this.completionIndex];
+        const exact = selected && this.textarea?.plainText.trim() === `/${selected.name}`;
+        if (exact) {
+          this.hideCompletion();
+          this.submitEditor();
+        } else {
+          this.acceptCompletion();
+        }
+        return;
+      }
       this.intercept(key);
       this.submitEditor();
     }
@@ -574,6 +621,7 @@ export class TuiApp {
   }
 
   private submitEditor(): void {
+    this.hideCompletion();
     const text = this.textarea?.plainText.trim() ?? "";
     if (!text) return;
     this.textarea?.setText("");
@@ -591,6 +639,97 @@ export class TuiApp {
     void this.options.submit(text).catch((error: unknown) => {
       this.notify(error instanceof Error ? error.message : String(error), "error");
     });
+  }
+
+  private completionVisible(): boolean {
+    return this.completionItems.length > 0 && this.completionBox?.visible === true;
+  }
+
+  private updateCompletion(): void {
+    const value = this.textarea?.plainText ?? "";
+    if (!value.startsWith("/") || value.includes(" ")) {
+      this.hideCompletion();
+      return;
+    }
+    const query = value.slice(1).toLowerCase();
+    const items = this.options.commands.filter((command) =>
+      command.name.toLowerCase().startsWith(query),
+    );
+    this.completionItems = items;
+    if (this.completionIndex >= items.length) this.completionIndex = 0;
+    this.renderCompletion();
+  }
+
+  private renderCompletion(): void {
+    if (!this.renderer || !this.root) return;
+    if (this.completionItems.length === 0) {
+      this.hideCompletion();
+      return;
+    }
+    if (!this.completionBox) {
+      this.completionBox = new BoxRenderable(this.renderer, {
+        id: "command-palette",
+        position: "absolute",
+        left: "2%",
+        bottom: 7,
+        width: "60%",
+        height: 10,
+        border: true,
+        borderStyle: "rounded",
+        borderColor: this.color("border"),
+        backgroundColor: this.theme.background,
+        paddingX: 1,
+        flexDirection: "column",
+        zIndex: 90,
+      });
+      for (let index = 0; index < 8; index += 1) {
+        const row = new TextRenderable(this.renderer, {
+          content: "",
+          fg: this.color("fg"),
+          wrapMode: "none",
+          truncate: true,
+          width: "100%",
+          visible: false,
+        });
+        this.completionRows.push(row);
+        this.completionBox.add(row);
+      }
+      this.root.add(this.completionBox);
+    }
+    const count = Math.min(8, this.completionItems.length);
+    const start = Math.max(0, Math.min(this.completionIndex - 3, this.completionItems.length - count));
+    this.completionBox.height = count + 2;
+    this.completionBox.title = `${this.completionItems.length} commands`;
+    this.completionBox.titleColor = this.color("muted");
+    this.completionBox.visible = true;
+    for (let rowIndex = 0; rowIndex < this.completionRows.length; rowIndex += 1) {
+      const row = this.completionRows[rowIndex];
+      const itemIndex = start + rowIndex;
+      const item = this.completionItems[itemIndex];
+      if (!row) continue;
+      if (!item || rowIndex >= count) {
+        row.visible = false;
+        continue;
+      }
+      const selected = itemIndex === this.completionIndex;
+      row.visible = true;
+      row.content = `${selected ? "› " : "  "}/${item.name}  ${item.description}`;
+      row.fg = selected ? this.color("accent") : this.color("fg");
+    }
+    this.renderer.requestRender();
+  }
+
+  private acceptCompletion(): void {
+    const item = this.completionItems[this.completionIndex];
+    if (!item) return;
+    this.textarea?.setText(`/${item.name} `);
+    this.hideCompletion();
+  }
+
+  private hideCompletion(): void {
+    this.completionItems = [];
+    this.completionIndex = 0;
+    if (this.completionBox) this.completionBox.visible = false;
   }
 
   private completeCommand(): boolean {

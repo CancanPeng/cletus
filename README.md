@@ -64,6 +64,8 @@ Keybinding changes apply on the next launch. `/theme` switches and persists imme
 
 ## Slash commands
 
+Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a command. `Enter` on a complete command such as `/quit` runs it immediately.
+
 `/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/keys`, `/mcp`, `/reload`, `/skill:<name>`, plus prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
 
 ## Project resources

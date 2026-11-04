@@ -106,6 +106,17 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("shows the slash command palette", async () => {
+    const ctx = await setupApp();
+    ctx.mockInput.typeText("/");
+    await ctx.flush();
+    const frame = ctx.captureCharFrame();
+    expect(frame).toContain("/test");
+    expect(frame).toContain("test command");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("renders assistant markdown and tool cards", async () => {
     const ctx = await setupApp();
     ctx.app.appendBlock({
