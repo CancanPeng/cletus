@@ -84,7 +84,9 @@ export class TuiApp {
   private scrollbox: ScrollBoxRenderable | undefined;
   private editorBox: BoxRenderable | undefined;
   private textarea: TextareaRenderable | undefined;
-  private footerText: TextRenderable | undefined;
+  private footerBox: BoxRenderable | undefined;
+  private footerLeft: TextRenderable | undefined;
+  private footerRight: TextRenderable | undefined;
   private modalBox: BoxRenderable | undefined;
   private selectBox: BoxRenderable | undefined;
   private completionBox: BoxRenderable | undefined;
@@ -94,7 +96,13 @@ export class TuiApp {
   private syntaxStyle: SyntaxStyle | undefined;
   private theme: Theme;
   private header: string;
-  private status = { busy: false, model: "", tokens: "", queue: 0 };
+  private status: {
+    busy: boolean;
+    model: string;
+    tokens: string;
+    queue: number;
+    activity?: string;
+  } = { busy: false, model: "", tokens: "", queue: 0 };
   private spinner = 0;
   private spinnerTimer: NodeJS.Timeout | undefined;
   private readonly blocks = new Map<string, TranscriptBlock>();
@@ -203,16 +211,33 @@ export class TuiApp {
     this.editorBox.add(this.textarea);
     this.root.add(this.editorBox);
 
-    this.footerText = new TextRenderable(this.renderer, {
+    this.footerBox = new BoxRenderable(this.renderer, {
       height: 1,
       flexShrink: 0,
+      flexDirection: "row",
       paddingX: 1,
+      backgroundColor: this.theme.background,
+    });
+    this.footerLeft = new TextRenderable(this.renderer, {
+      content: "",
+      flexGrow: 1,
+      height: 1,
+      fg: this.theme.colors.success,
+      wrapMode: "none",
+      truncate: true,
+    });
+    this.footerRight = new TextRenderable(this.renderer, {
+      content: "",
+      flexShrink: 0,
+      height: 1,
       fg: this.theme.colors.muted,
       wrapMode: "none",
       truncate: true,
-      content: this.footerContent(),
     });
-    this.root.add(this.footerText);
+    this.footerBox.add(this.footerLeft);
+    this.footerBox.add(this.footerRight);
+    this.root.add(this.footerBox);
+    this.updateFooter();
 
     this.renderer.keyInput.on("keypress", this.handleKey);
     this.textarea.focus();
@@ -249,7 +274,13 @@ export class TuiApp {
     this.updateView(next);
   }
 
-  setStatus(status: { busy: boolean; model: string; tokens: string; queue: number }): void {
+  setStatus(status: {
+    busy: boolean;
+    model: string;
+    tokens: string;
+    queue: number;
+    activity?: string;
+  }): void {
     this.status = status;
     if (status.busy && !this.spinnerTimer) {
       this.spinnerTimer = setInterval(() => {
@@ -275,7 +306,9 @@ export class TuiApp {
     if (this.root) this.root.backgroundColor = theme.background;
     if (this.headerText) this.headerText.fg = theme.colors.accent;
     if (this.headerBox) this.headerBox.backgroundColor = theme.background;
-    if (this.footerText) this.footerText.fg = theme.colors.muted;
+    if (this.footerLeft) this.footerLeft.fg = theme.colors.success;
+    if (this.footerRight) this.footerRight.fg = theme.colors.muted;
+    if (this.footerBox) this.footerBox.backgroundColor = theme.background;
     if (this.completionBox) {
       this.completionBox.backgroundColor = theme.background;
       this.completionBox.borderColor = theme.colors.border;
@@ -302,6 +335,7 @@ export class TuiApp {
     }
     if (this.modal) this.renderModal();
     if (this.selectState) this.renderSelect();
+    this.updateFooter();
     this.renderer.requestRender();
   }
 
@@ -716,6 +750,7 @@ export class TuiApp {
       row.content = `${selected ? "› " : "  "}/${item.name}  ${item.description}`;
       row.fg = selected ? this.color("accent") : this.color("fg");
     }
+    this.updateFooter();
     this.renderer.requestRender();
   }
 
@@ -730,6 +765,7 @@ export class TuiApp {
     this.completionItems = [];
     this.completionIndex = 0;
     if (this.completionBox) this.completionBox.visible = false;
+    this.updateFooter();
   }
 
   private completeCommand(): boolean {
@@ -778,27 +814,44 @@ export class TuiApp {
     }
   }
 
-  private footerContent(): string {
-    const bindings = this.options.keybindings;
-    const parts = [
-      `${bindings.get("submit")[0]} send`,
-      `${bindings.get("newline")[0]} newline`,
-      `${bindings.get("abort")[0]} abort`,
-      "/help",
-    ];
+  private footerLeftContent(): string {
+    const tokens = this.status.tokens ? `${this.status.tokens} tok` : "";
+    if (this.modal) return "waiting for permission";
+    if (this.selectState) return "select an item";
     if (this.status.busy) {
-      parts.unshift(`${SPINNER[this.spinner] ?? "⠋"} working`);
-      parts.push(`${bindings.get("cancel")[0]} to abort`);
+      const activity = this.status.activity ?? "working";
+      const suffix = [
+        tokens,
+        this.status.queue > 0 ? `${this.status.queue} queued` : "",
+      ].filter(Boolean).join(" · ");
+      return `${SPINNER[this.spinner] ?? "⠋"} ${activity}${suffix ? ` · ${suffix}` : ""}`;
     }
-    if (this.status.queue > 0) parts.push(`${this.status.queue} queued`);
-    const prefix = this.status.model
-      ? `${this.status.model}${this.status.tokens ? ` · ${this.status.tokens} tokens` : ""} · `
-      : "";
-    return `${prefix}${parts.join(" · ")}`;
+    return `● ready${tokens ? ` · ${tokens}` : ""}`;
+  }
+
+  private footerRightContent(): string {
+    const bindings = this.options.keybindings;
+    if (this.modal) {
+      return `${bindings.get("modalAllow")[0]} allow · ${bindings.get("modalSession")[0]} session · ${bindings.get("modalDeny")[0]} deny`;
+    }
+    if (this.selectState) return "↑↓ select · enter confirm · esc cancel";
+    if (this.completionVisible()) return "↑↓ choose · tab insert · esc close";
+    if (this.status.busy) {
+      return `${bindings.get("cancel")[0]} abort · ${bindings.get("toggleToolOutput")[0]} tools`;
+    }
+    return `${bindings.get("submit")[0]} send · / commands · ${bindings.get("toggleToolOutput")[0]} tools`;
   }
 
   private updateFooter(): void {
-    if (this.footerText) this.footerText.content = this.footerContent();
+    if (!this.footerLeft || !this.footerRight) return;
+    this.footerLeft.content = this.footerLeftContent();
+    this.footerRight.content = this.footerRightContent();
+    this.footerLeft.fg = this.modal
+      ? this.color("warning")
+      : this.status.busy
+        ? this.color("accent")
+        : this.color("success");
+    this.footerRight.fg = this.color("muted");
   }
 
   private handleModalKey(key: KeyEvent): void {
@@ -818,6 +871,7 @@ export class TuiApp {
     this.modalBox = undefined;
     modal?.resolve(decision);
     this.textarea?.focus();
+    this.updateFooter();
   }
 
   private renderModal(): void {
@@ -869,6 +923,7 @@ export class TuiApp {
     );
     this.root.add(box);
     this.modalBox = box;
+    this.updateFooter();
     this.renderer.requestRender();
   }
 
@@ -884,6 +939,7 @@ export class TuiApp {
       this.selectBox = undefined;
       state.resolve(state.items[state.index]?.value);
       this.textarea?.focus();
+      this.updateFooter();
       return;
     } else if (key.name === "escape") {
       this.selectState = undefined;
@@ -891,6 +947,7 @@ export class TuiApp {
       this.selectBox = undefined;
       state.resolve(undefined);
       this.textarea?.focus();
+      this.updateFooter();
       return;
     }
     this.renderSelect();
@@ -953,5 +1010,6 @@ export class TuiApp {
     );
     this.root.add(box);
     this.selectBox = box;
+    this.updateFooter();
   }
 }

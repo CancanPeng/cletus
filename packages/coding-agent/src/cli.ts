@@ -214,6 +214,13 @@ async function runTui(opts: {
   const mapEvent = (event: AgentEvent): void => {
     if (!app || !session) return;
     if (event.type === "message_start" && event.message.role === "assistant") {
+      app.setStatus({
+        busy: true,
+        model: session.model.ref ?? session.model.id,
+        tokens: "",
+        queue: session.agent.queuedMessageCount,
+        activity: "thinking",
+      });
       assistantId = `a${blockCounter++}`;
       assistantText = "";
       app.appendBlock({ id: assistantId, kind: "assistant", text: "" });
@@ -237,6 +244,13 @@ async function runTui(opts: {
         app.notify(event.message.errorMessage ?? "Model error", "error");
       }
     } else if (event.type === "tool_execution_start") {
+      app.setStatus({
+        busy: true,
+        model: session.model.ref ?? session.model.id,
+        tokens: "",
+        queue: session.agent.queuedMessageCount,
+        activity: `running ${event.toolName}`,
+      });
       app.appendBlock({
         id: `t${event.toolCallId}`,
         kind: "tool",
@@ -256,12 +270,20 @@ async function runTui(opts: {
         output: text,
         isError: event.result.isError === true,
       });
+      app.setStatus({
+        busy: true,
+        model: session.model.ref ?? session.model.id,
+        tokens: "",
+        queue: session.agent.queuedMessageCount,
+        activity: "thinking",
+      });
     } else if (event.type === "turn_end") {
       app.setStatus({
         busy: true,
         model: session.model.ref ?? session.model.id,
         tokens: String(event.message.usage.totalTokens),
-        queue: 0,
+        queue: session.agent.queuedMessageCount,
+        activity: "thinking",
       });
     } else if (event.type === "agent_end") {
       app.setStatus({
@@ -475,6 +497,7 @@ async function runTui(opts: {
         model: session.model.ref ?? session.model.id,
         tokens: "",
         queue: session.agent.queuedMessageCount,
+        activity: "thinking",
       });
       try {
         await session.prompt(text);

@@ -106,6 +106,32 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("renders activity and key hints in the status line", async () => {
+    const ctx = await setupApp();
+    ctx.app.setStatus({
+      busy: true,
+      model: "openai/fake",
+      tokens: "9",
+      queue: 1,
+      activity: "running read",
+    });
+    await ctx.flush();
+    let frame = ctx.captureCharFrame();
+    expect(frame).toContain("running read");
+    expect(frame).toContain("9 tok");
+    expect(frame).toContain("1 queued");
+    const decision = ctx.app.confirm("Permission", "Write a.txt");
+    await ctx.flush();
+    frame = ctx.captureCharFrame();
+    expect(frame).toContain("waiting for permission");
+    expect(frame).toContain("y allow");
+    ctx.mockInput.pressKey("n");
+    await ctx.flush();
+    await expect(decision).resolves.toBe("deny");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("shows the slash command palette", async () => {
     const ctx = await setupApp();
     ctx.mockInput.typeText("/");
