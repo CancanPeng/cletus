@@ -79,12 +79,12 @@ export class TuiApp {
   private renderer: CliRenderer | undefined;
   private ownsRenderer = true;
   private root: BoxRenderable | undefined;
-  private headerText: TextRenderable | undefined;
-  private headerBox: BoxRenderable | undefined;
+  private footerInfo: TextRenderable | undefined;
   private scrollbox: ScrollBoxRenderable | undefined;
   private editorBox: BoxRenderable | undefined;
   private textarea: TextareaRenderable | undefined;
   private footerBox: BoxRenderable | undefined;
+  private footerRow: BoxRenderable | undefined;
   private footerLeft: TextRenderable | undefined;
   private footerRight: TextRenderable | undefined;
   private modalBox: BoxRenderable | undefined;
@@ -146,23 +146,6 @@ export class TuiApp {
     });
     this.renderer.root.add(this.root);
 
-    const headerBox = new BoxRenderable(this.renderer, {
-      height: 1,
-      flexShrink: 0,
-      paddingX: 1,
-      backgroundColor: this.theme.background,
-    });
-    this.headerText = new TextRenderable(this.renderer, {
-      content: this.header,
-      fg: this.theme.colors.accent,
-      wrapMode: "none",
-      truncate: true,
-      height: 1,
-    });
-    this.headerBox = headerBox;
-    headerBox.add(this.headerText);
-    this.root.add(headerBox);
-
     this.scrollbox = new ScrollBoxRenderable(this.renderer, {
       id: "transcript",
       flexGrow: 1,
@@ -212,11 +195,22 @@ export class TuiApp {
     this.root.add(this.editorBox);
 
     this.footerBox = new BoxRenderable(this.renderer, {
-      height: 1,
+      height: 2,
       flexShrink: 0,
-      flexDirection: "row",
+      flexDirection: "column",
       paddingX: 1,
       backgroundColor: this.theme.background,
+    });
+    this.footerInfo = new TextRenderable(this.renderer, {
+      content: this.header,
+      height: 1,
+      fg: this.theme.colors.accent,
+      wrapMode: "none",
+      truncate: true,
+    });
+    this.footerRow = new BoxRenderable(this.renderer, {
+      height: 1,
+      flexDirection: "row",
     });
     this.footerLeft = new TextRenderable(this.renderer, {
       content: "",
@@ -234,8 +228,10 @@ export class TuiApp {
       wrapMode: "none",
       truncate: true,
     });
-    this.footerBox.add(this.footerLeft);
-    this.footerBox.add(this.footerRight);
+    this.footerRow.add(this.footerLeft);
+    this.footerRow.add(this.footerRight);
+    this.footerBox.add(this.footerInfo);
+    this.footerBox.add(this.footerRow);
     this.root.add(this.footerBox);
     this.updateFooter();
 
@@ -296,7 +292,7 @@ export class TuiApp {
 
   setHeader(header: string): void {
     this.header = header;
-    if (this.headerText) this.headerText.content = header;
+    if (this.footerInfo) this.footerInfo.content = header;
   }
 
   setTheme(theme: Theme): void {
@@ -304,8 +300,9 @@ export class TuiApp {
     if (!this.renderer) return;
     this.renderer.setBackgroundColor(theme.background);
     if (this.root) this.root.backgroundColor = theme.background;
-    if (this.headerText) this.headerText.fg = theme.colors.accent;
-    if (this.headerBox) this.headerBox.backgroundColor = theme.background;
+    if (this.footerInfo) this.footerInfo.fg = theme.colors.accent;
+    if (this.footerInfo) this.footerInfo.bg = theme.background;
+    if (this.footerRow) this.footerRow.backgroundColor = theme.background;
     if (this.footerLeft) this.footerLeft.fg = theme.colors.success;
     if (this.footerRight) this.footerRight.fg = theme.colors.muted;
     if (this.footerBox) this.footerBox.backgroundColor = theme.background;
