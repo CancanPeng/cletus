@@ -1,5 +1,6 @@
 import {
   BoxRenderable,
+  CliRenderEvents,
   MarkdownRenderable,
   ScrollBoxRenderable,
   SyntaxStyle,
@@ -170,23 +171,21 @@ export class TuiApp {
       marginX: 1,
       border: true,
       borderStyle: "rounded",
-      borderColor: this.theme.colors.border,
-      title: " message ",
-      titleColor: this.theme.colors.muted,
+      borderColor: this.theme.colors.inputBorder,
       paddingX: 1,
-      backgroundColor: this.theme.background,
+      backgroundColor: this.theme.colors.inputBg,
     });
     this.textarea = new TextareaRenderable(this.renderer, {
       id: "editor",
       width: "100%",
       height: 3,
       placeholder: "Ask cletus to change code, run tests, or explain the repo…",
-      placeholderColor: this.theme.colors.muted,
-      backgroundColor: this.theme.background,
-      textColor: this.theme.colors.fg,
-      focusedBackgroundColor: this.theme.background,
-      focusedTextColor: this.theme.colors.fg,
-      cursorColor: this.theme.colors.accent,
+      placeholderColor: this.theme.colors.inputPlaceholder,
+      backgroundColor: this.theme.colors.inputBg,
+      textColor: this.theme.colors.inputText,
+      focusedBackgroundColor: this.theme.colors.inputBg,
+      focusedTextColor: this.theme.colors.inputText,
+      cursorColor: this.theme.colors.inputFocus,
       keyBindings: [{ name: "return", shift: true, action: "newline" }],
       onSubmit: () => this.onTextareaSubmit(),
       onContentChange: () => this.updateCompletion(),
@@ -235,6 +234,12 @@ export class TuiApp {
     this.root.add(this.footerBox);
     this.updateFooter();
 
+    this.renderer.on(CliRenderEvents.FOCUSED_RENDERABLE, (current: unknown) => {
+      if (this.editorBox) {
+        this.editorBox.borderColor =
+          current === this.textarea ? this.color("inputFocus") : this.color("inputBorder");
+      }
+    });
     this.renderer.keyInput.on("keypress", this.handleKey);
     this.textarea.focus();
     this.rebuildBlocks();
@@ -312,17 +317,17 @@ export class TuiApp {
     }
     if (this.completionItems.length > 0) this.renderCompletion();
     if (this.editorBox) {
-      this.editorBox.backgroundColor = theme.background;
-      this.editorBox.borderColor = theme.colors.border;
-      this.editorBox.titleColor = theme.colors.muted;
+      this.editorBox.backgroundColor = theme.colors.inputBg;
+      this.editorBox.borderColor =
+        this.textarea?.focused === true ? theme.colors.inputFocus : theme.colors.inputBorder;
     }
     if (this.textarea) {
-      this.textarea.backgroundColor = theme.background;
-      this.textarea.textColor = theme.colors.fg;
-      this.textarea.focusedBackgroundColor = theme.background;
-      this.textarea.focusedTextColor = theme.colors.fg;
-      this.textarea.cursorColor = theme.colors.accent;
-      this.textarea.placeholderColor = theme.colors.muted;
+      this.textarea.backgroundColor = theme.colors.inputBg;
+      this.textarea.textColor = theme.colors.inputText;
+      this.textarea.focusedBackgroundColor = theme.colors.inputBg;
+      this.textarea.focusedTextColor = theme.colors.inputText;
+      this.textarea.cursorColor = theme.colors.inputFocus;
+      this.textarea.placeholderColor = theme.colors.inputPlaceholder;
     }
     this.syntaxStyle = this.createSyntaxStyle();
     if (this.scrollbox) {

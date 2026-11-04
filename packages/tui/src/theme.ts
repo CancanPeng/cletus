@@ -9,7 +9,12 @@ export type ThemeToken =
   | "user"
   | "assistant"
   | "tool"
-  | "code";
+  | "code"
+  | "inputBg"
+  | "inputBorder"
+  | "inputFocus"
+  | "inputText"
+  | "inputPlaceholder";
 
 export type Theme = {
   name: "dark" | "light" | "tokyo-night";
@@ -32,6 +37,11 @@ const THEMES: Record<Theme["name"], Omit<Theme, "name">> = {
       assistant: "#c0caf5",
       tool: "#bb9af7",
       code: "#ff9e64",
+      inputBg: "#1f2335",
+      inputBorder: "#3b4261",
+      inputFocus: "#7aa2f7",
+      inputText: "#c0caf5",
+      inputPlaceholder: "#565f89",
     },
   },
   light: {
@@ -48,6 +58,11 @@ const THEMES: Record<Theme["name"], Omit<Theme, "name">> = {
       assistant: "#1f2335",
       tool: "#6c4bb6",
       code: "#965027",
+      inputBg: "#ffffff",
+      inputBorder: "#d0d5e3",
+      inputFocus: "#2e7de9",
+      inputText: "#1f2335",
+      inputPlaceholder: "#6b7089",
     },
   },
   "tokyo-night": {
@@ -64,6 +79,11 @@ const THEMES: Record<Theme["name"], Omit<Theme, "name">> = {
       assistant: "#c0caf5",
       tool: "#bb9af7",
       code: "#ff9e64",
+      inputBg: "#1f2335",
+      inputBorder: "#414868",
+      inputFocus: "#7aa2f7",
+      inputText: "#c0caf5",
+      inputPlaceholder: "#565f89",
     },
   },
 };

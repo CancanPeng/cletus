@@ -132,6 +132,18 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("does not show a message title on the input box", async () => {
+    const ctx = await setupApp();
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).not.toContain("message");
+    ctx.app.setTheme(getTheme("light"));
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).not.toContain("message");
+    expect(getTheme("light").colors.inputBg).not.toBe(getTheme("dark").colors.inputBg);
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("shows the slash command palette", async () => {
     const ctx = await setupApp();
     ctx.mockInput.typeText("/");
