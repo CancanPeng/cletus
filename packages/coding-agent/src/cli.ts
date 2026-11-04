@@ -3,6 +3,8 @@ import { access, readFile, mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { parseArgs } from "node:util";
 import type { AgentEvent, AgentMessage } from "@cletus/agent";
 import type { Model } from "@cletus/ai";
@@ -32,6 +34,7 @@ import { SessionManager } from "./session/manager.js";
 import { expandTemplate } from "./resources/prompts.js";
 
 const VERSION = "0.1.0";
+const execFileAsync = promisify(execFile);
 const BUILTIN_COMMANDS = [
   "help",
   "quit",
@@ -136,10 +139,33 @@ async function decideTrust(
   return accepted;
 }
 
-function headerFor(cwd: string, session: AgentSession): string {
+async function gitBranch(cwd: string): Promise<string | undefined> {
+  try {
+    const branch = await execFileAsync("git", ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"], {
+      timeout: 1000,
+    });
+    const name = String(branch.stdout).trim();
+    if (name && name !== "HEAD") return name;
+    const sha = await execFileAsync("git", ["-C", cwd, "rev-parse", "--short", "HEAD"], {
+      timeout: 1000,
+    });
+    return String(sha.stdout).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function headerFor(cwd: string, session: AgentSession, branch?: string): string {
   const home = homedir();
   const shortCwd = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
-  return `cletus · ${session.model.ref ?? `${session.model.provider}/${session.model.id}`} · ${shortCwd} · ${session.manager.sessionId.slice(0, 8)}`;
+  const parts = [
+    "cletus",
+    session.model.ref ?? `${session.model.provider}/${session.model.id}`,
+    shortCwd,
+  ];
+  if (branch) parts.push(`git:${branch}`);
+  parts.push(session.manager.sessionId.slice(0, 8));
+  return parts.join(" · ");
 }
 
 function eventText(message: AgentMessage): string {
@@ -198,6 +224,12 @@ async function runTui(opts: {
   let assistantId: string | undefined;
   let assistantText = "";
   let blockCounter = 0;
+  let branch = await gitBranch(opts.cwd);
+
+  const refreshHeader = async (): Promise<void> => {
+    branch = await gitBranch(opts.cwd);
+    if (session) app?.setHeader(headerFor(opts.cwd, session, branch));
+  };
 
   const confirm = async (req: { summary: string }): Promise<"allow" | "session" | "deny"> =>
     app ? app.confirm("Permission required", req.summary) : "deny";
@@ -316,7 +348,7 @@ async function runTui(opts: {
       onNotice: (text, level) => app?.notify(text, level),
     });
     unsubscribe = session.subscribe(mapEvent);
-    app?.setHeader(headerFor(opts.cwd, session));
+    app?.setHeader(headerFor(opts.cwd, session, branch));
   };
 
   const commands: SlashCommand[] = [
@@ -372,7 +404,7 @@ async function runTui(opts: {
         if (args) {
           const model = resolveModel(opts.config, opts.auth, args);
           await session.switchModel(model);
-          app?.setHeader(headerFor(opts.cwd, session));
+          await refreshHeader();
           return;
         }
         const choice = await app?.select(
@@ -385,7 +417,7 @@ async function runTui(opts: {
         if (!choice) return;
         const model = resolveModel(opts.config, opts.auth, choice);
         await session.switchModel(model);
-        app?.setHeader(headerFor(opts.cwd, session));
+        await refreshHeader();
       },
     },
     {
@@ -488,6 +520,7 @@ async function runTui(opts: {
     keybindings,
     submit: async (text) => {
       if (!session) return;
+      await refreshHeader();
       if (session.agent.state.isStreaming) {
         session.steer(text);
         return;
