@@ -44,6 +44,7 @@ const BUILTIN_COMMANDS = [
   "model",
   "theme",
   "keys",
+  "skills",
   "mcp",
   "reload",
 ];
@@ -70,6 +71,7 @@ Options:
 Subcommands:
   cletus mcp add|list|remove
   cletus sessions list
+  cletus skills list|enable|disable
   cletus import-pi [--from <piHome>] [--force]`;
 }
 
@@ -470,6 +472,57 @@ async function runTui(opts: {
       },
     },
     {
+      name: "skills",
+      description: "Manage skills",
+      run: async () => {
+        if (!session) return;
+        if (session.agent.state.isStreaming) {
+          app?.notify("Cannot manage skills while running", "warn");
+          return;
+        }
+        for (;;) {
+          const skills = opts.resources.cached?.skills ?? [];
+          if (skills.length === 0) {
+            app?.notify("No skills found", "warn");
+            return;
+          }
+          const name = await app?.select(
+            "Skills",
+            skills.map((skill) => ({
+              label: `[${skill.disableModelInvocation ? "off" : "on"}] ${skill.name} — ${skill.description}`,
+              value: skill.name,
+            })),
+          );
+          if (!name) return;
+          const skill = skills.find((candidate) => candidate.name === name);
+          if (!skill) return;
+          const action = await app?.select(`Skill: ${name}`, [
+            {
+              label: skill.disableModelInvocation
+                ? "Enable model invocation"
+                : "Disable model invocation",
+              value: "toggle",
+            },
+            { label: "Show path", value: "path" },
+            { label: "Reload skills", value: "reload" },
+          ]);
+          if (!action) return;
+          if (action === "toggle") {
+            await opts.resources.setSkillDisabled(name, !skill.disableModelInvocation);
+            await session.reload();
+            app?.notify(
+              `${skill.disableModelInvocation ? "Enabled" : "Disabled"} ${name} for model invocation`,
+            );
+          } else if (action === "path") {
+            app?.notify(skill.path);
+          } else if (action === "reload") {
+            await session.reload();
+            app?.notify("Skills reloaded");
+          }
+        }
+      },
+    },
+    {
       name: "mcp",
       description: "Show MCP server status",
       run: () => {
@@ -746,6 +799,32 @@ async function sessionsCommand(argv: string[]): Promise<number> {
   return 0;
 }
 
+async function skillsCommand(argv: string[]): Promise<number> {
+  const action = argv[0];
+  const loader = new ResourceLoader(process.cwd(), cletusHome());
+  const loaded = await loader.load();
+  if (action === "list") {
+    if (loaded.skills.length === 0) {
+      process.stdout.write("No skills\n");
+      return 0;
+    }
+    for (const skill of loaded.skills) {
+      process.stdout.write(
+        `${skill.disableModelInvocation ? "off" : "on"}\t${skill.name}\t${skill.path}\t${skill.description}\n`,
+      );
+    }
+    return 0;
+  }
+  if (action === "enable" || action === "disable") {
+    const name = argv[1];
+    if (!name) throw new ConfigError(`Usage: cletus skills ${action} <name>`);
+    await loader.setSkillDisabled(name, action === "disable");
+    process.stdout.write(`${action === "enable" ? "Enabled" : "Disabled"} ${name}\n`);
+    return 0;
+  }
+  throw new ConfigError("Usage: cletus skills list|enable|disable");
+}
+
 async function importCommand(argv: string[]): Promise<number> {
   const parsed = parseArgs({
     args: argv,
@@ -770,6 +849,7 @@ async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   if (argv[0] === "mcp") return mcpCommand(argv.slice(1));
   if (argv[0] === "sessions") return sessionsCommand(argv.slice(1));
+  if (argv[0] === "skills") return skillsCommand(argv.slice(1));
   if (argv[0] === "import-pi") return importCommand(argv.slice(1));
 
   const parsed = parseArgs({

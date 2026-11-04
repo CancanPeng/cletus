@@ -1,6 +1,6 @@
-import { glob, readFile, realpath } from "node:fs/promises";
+import { chmod, glob, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { findRepoRoot } from "./context-files.js";
 
 export type Skill = {
@@ -97,4 +97,30 @@ export async function loadSkills(
     }
   }
   return { skills, roots: [...roots] };
+}
+
+export async function setSkillModelInvocation(
+  path: string,
+  disabled: boolean,
+): Promise<void> {
+  const text = await readFile(path, "utf8");
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+  if (!match) throw new Error(`Skill has no frontmatter: ${path}`);
+  let meta: Record<string, unknown> = {};
+  try {
+    const parsed = parseYaml(match[1] ?? "");
+    if (parsed && typeof parsed === "object") meta = parsed as Record<string, unknown>;
+  } catch {
+    throw new Error(`Invalid skill frontmatter: ${path}`);
+  }
+  if (disabled) meta["disable-model-invocation"] = true;
+  else delete meta["disable-model-invocation"];
+  const header = stringifyYaml(meta).trimEnd();
+  const body = text.slice(match[0].length);
+  const updated = `---\n${header}\n---\n${body}`;
+  const info = await stat(path);
+  const temp = join(dirname(path), `.${Date.now()}.${process.pid}.skill.tmp`);
+  await writeFile(temp, updated, "utf8");
+  await chmod(temp, info.mode);
+  await rename(temp, path);
 }

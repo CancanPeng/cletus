@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -37,6 +37,30 @@ describe("resources", () => {
     expect(loaded.prompts.map((prompt) => prompt.name)).toContain("review");
     expect(loaded.contextFiles[0]?.content).toContain("two spaces");
     expect(loaded.readOnlyRoots.some((root) => root.endsWith("/skills/pdf"))).toBe(true);
+  });
+
+  it("toggles model invocation by editing skill frontmatter", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    await mkdir(join(home, "skills", "pdf"), { recursive: true });
+    const path = join(home, "skills", "pdf", "SKILL.md");
+    await writeFile(
+      path,
+      "---\nname: pdf\ndescription: Extract PDF text\n---\nOriginal body\n",
+    );
+    const loader = new ResourceLoader(cwd, home);
+    await loader.load();
+    await loader.setSkillDisabled("pdf", true);
+    let text = await readFile(path, "utf8");
+    expect(text).toContain("disable-model-invocation: true");
+    expect(text).toContain("Original body");
+    let loaded = await loader.load();
+    expect(loaded.skills.find((skill) => skill.name === "pdf")?.disableModelInvocation).toBe(true);
+    await loader.setSkillDisabled("pdf", false);
+    text = await readFile(path, "utf8");
+    expect(text).not.toContain("disable-model-invocation");
+    loaded = await loader.load();
+    expect(loaded.skills.find((skill) => skill.name === "pdf")?.disableModelInvocation).toBe(false);
   });
 
   it("expands positional and sliced arguments", () => {

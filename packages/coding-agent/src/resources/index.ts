@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { loadContextFiles, type ContextFile } from "./context-files.js";
 import { loadPrompts, type PromptTemplate } from "./prompts.js";
-import { loadSkills, type Skill } from "./skills.js";
+import { loadSkills, setSkillModelInvocation, type Skill } from "./skills.js";
 
 export type LoadedResources = {
   skills: Skill[];
@@ -47,6 +47,15 @@ export class ResourceLoader {
 
   reload(): void {
     this.loaded = undefined;
+  }
+
+  async setSkillDisabled(name: string, disabled: boolean): Promise<Skill> {
+    const loaded = this.loaded ?? (await this.load());
+    const skill = loaded.skills.find((candidate) => candidate.name === name);
+    if (!skill) throw new Error(`Skill not found: ${name}`);
+    await setSkillModelInvocation(skill.path, disabled);
+    this.reload();
+    return skill;
   }
 }
 

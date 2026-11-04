@@ -153,6 +153,22 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("renders select options", async () => {
+    const ctx = await setupApp();
+    const selection = ctx.app.select("Skills", [
+      { label: "[on] demo — Demo skill", value: "demo" },
+    ]);
+    await ctx.flush();
+    const frame = ctx.captureCharFrame();
+    expect(frame).toContain("Skills");
+    expect(frame).toContain("demo");
+    ctx.mockInput.pressEnter();
+    await ctx.flush();
+    await expect(selection).resolves.toBe("demo");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("shows the slash command palette", async () => {
     const ctx = await setupApp();
     ctx.mockInput.typeText("/");

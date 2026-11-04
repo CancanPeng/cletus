@@ -974,7 +974,7 @@ export class TuiApp {
       top: "22%",
       left: "12%",
       width: "76%",
-      height: visible + 5,
+      height: visible + 7,
       border: true,
       borderStyle: "rounded",
       borderColor: this.color("accent"),

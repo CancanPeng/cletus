@@ -66,7 +66,19 @@ Keybinding changes apply on the next launch. `/theme` switches and persists imme
 
 Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a command. `Enter` on a complete command such as `/quit` runs it immediately.
 
-`/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/keys`, `/mcp`, `/reload`, `/skill:<name>`, plus prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
+`/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/keys`, `/skills`, `/mcp`, `/reload`, `/skill:<name>`, plus prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
+
+## Skills
+
+`/skills` opens an interactive manager: select a skill, then enable/disable model invocation, show its path, or reload. The toggle edits `disable-model-invocation` in the skill's frontmatter. `/skill:<name>` always works even when model invocation is disabled.
+
+CLI equivalents:
+
+```bash
+cletus skills list
+cletus skills enable demo
+cletus skills disable demo
+```
 
 ## Project resources
 
