@@ -155,6 +155,19 @@ async function gitBranch(cwd: string): Promise<string | undefined> {
   }
 }
 
+function shortTokens(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
+  if (value >= 10_000) return `${Math.round(value / 1000)}k`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
+  return String(value);
+}
+
+function contextLabel(session: AgentSession): string {
+  const usage = session.getContextUsage();
+  const percent = usage.window > 0 ? Math.round((usage.used / usage.window) * 100) : 0;
+  return `${shortTokens(usage.used)}/${shortTokens(usage.window)} ${Math.min(100, percent)}%`;
+}
+
 function headerFor(cwd: string, session: AgentSession, branch?: string): string {
   const home = homedir();
   const shortCwd = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
@@ -252,6 +265,7 @@ async function runTui(opts: {
         tokens: "",
         queue: session.agent.queuedMessageCount,
         activity: "thinking",
+        context: contextLabel(session),
       });
       assistantId = `a${blockCounter++}`;
       assistantText = "";
@@ -282,6 +296,7 @@ async function runTui(opts: {
         tokens: "",
         queue: session.agent.queuedMessageCount,
         activity: `running ${event.toolName}`,
+        context: contextLabel(session),
       });
       app.appendBlock({
         id: `t${event.toolCallId}`,
@@ -308,6 +323,7 @@ async function runTui(opts: {
         tokens: "",
         queue: session.agent.queuedMessageCount,
         activity: "thinking",
+        context: contextLabel(session),
       });
     } else if (event.type === "turn_end") {
       app.setStatus({
@@ -316,6 +332,7 @@ async function runTui(opts: {
         tokens: String(event.message.usage.totalTokens),
         queue: session.agent.queuedMessageCount,
         activity: "thinking",
+        context: contextLabel(session),
       });
     } else if (event.type === "agent_end") {
       app.setStatus({
@@ -323,6 +340,7 @@ async function runTui(opts: {
         model: session.model.ref ?? session.model.id,
         tokens: "",
         queue: 0,
+        context: contextLabel(session),
       });
       assistantId = undefined;
     }
@@ -531,6 +549,7 @@ async function runTui(opts: {
         tokens: "",
         queue: session.agent.queuedMessageCount,
         activity: "thinking",
+        context: contextLabel(session),
       });
       try {
         await session.prompt(text);
@@ -540,6 +559,7 @@ async function runTui(opts: {
           model: session.model.ref ?? session.model.id,
           tokens: "",
           queue: session.agent.queuedMessageCount,
+          context: contextLabel(session),
         });
       }
     },
@@ -552,6 +572,15 @@ async function runTui(opts: {
 
   await attach(opts.manager);
   await app.start();
+  if (session) {
+    app.setStatus({
+      busy: false,
+      model: session.model.ref ?? session.model.id,
+      tokens: "",
+      queue: 0,
+      context: contextLabel(session),
+    });
+  }
   await done.promise;
   unsubscribe?.();
   await session?.dispose();

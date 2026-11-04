@@ -322,6 +322,32 @@ export class AgentSession {
     this.refreshTools();
   }
 
+  getContextUsage(): { used: number; window: number } {
+    const projection = buildProjection(this.manager).messages;
+    const messages: LlmContext["messages"] = projection.map((message) =>
+      message.role === "custom"
+        ? {
+            role: "user",
+            content: `[${message.customType}]\n${message.content}`,
+            timestamp: message.timestamp,
+          }
+        : message,
+    );
+    const tools = this.agent.state.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    }));
+    return {
+      used: estimateContextTokens({
+        systemPrompt: this.systemPrompt,
+        messages,
+        tools,
+      }),
+      window: this.model.contextWindow,
+    };
+  }
+
   getLastAssistantText(): string {
     const messages = this.agent.state.messages;
     for (let index = messages.length - 1; index >= 0; index -= 1) {

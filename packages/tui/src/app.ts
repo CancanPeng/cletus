@@ -103,6 +103,7 @@ export class TuiApp {
     tokens: string;
     queue: number;
     activity?: string;
+    context?: string;
   } = { busy: false, model: "", tokens: "", queue: 0 };
   private spinner = 0;
   private spinnerTimer: NodeJS.Timeout | undefined;
@@ -281,6 +282,7 @@ export class TuiApp {
     tokens: string;
     queue: number;
     activity?: string;
+    context?: string;
   }): void {
     this.status = status;
     if (status.busy && !this.spinnerTimer) {
@@ -817,18 +819,22 @@ export class TuiApp {
   }
 
   private footerLeftContent(): string {
-    const tokens = this.status.tokens ? `${this.status.tokens} tok` : "";
+    const usage = this.status.context
+      ? `ctx ${this.status.context}`
+      : this.status.tokens
+        ? `${this.status.tokens} tok`
+        : "";
     if (this.modal) return "waiting for permission";
     if (this.selectState) return "select an item";
     if (this.status.busy) {
       const activity = this.status.activity ?? "working";
       const suffix = [
-        tokens,
+        usage,
         this.status.queue > 0 ? `${this.status.queue} queued` : "",
       ].filter(Boolean).join(" · ");
       return `${SPINNER[this.spinner] ?? "⠋"} ${activity}${suffix ? ` · ${suffix}` : ""}`;
     }
-    return `● ready${tokens ? ` · ${tokens}` : ""}`;
+    return `● ready${usage ? ` · ${usage}` : ""}`;
   }
 
   private footerRightContent(): string {

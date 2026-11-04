@@ -120,6 +120,15 @@ describe("TuiApp", () => {
     expect(frame).toContain("running read");
     expect(frame).toContain("9 tok");
     expect(frame).toContain("1 queued");
+    ctx.app.setStatus({
+      busy: false,
+      model: "openai/fake",
+      tokens: "",
+      queue: 0,
+      context: "12.4k/128k 10%",
+    });
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("ctx 12.4k/128k 10%");
     const decision = ctx.app.confirm("Permission", "Write a.txt");
     await ctx.flush();
     frame = ctx.captureCharFrame();
