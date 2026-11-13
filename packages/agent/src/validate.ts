@@ -1,8 +1,38 @@
 import { Ajv, type ValidateFunction } from "ajv";
+import { Ajv2019 } from "ajv/dist/2019.js";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import type { JsonSchema } from "@cletus/ai";
 
-const ajv = new Ajv({ allErrors: true, strict: false });
+/**
+ * Tool schemas arrive from many sources (built-ins, MCP servers), and they do not
+ * agree on a JSON Schema dialect. MCP servers in particular ship draft 2020-12
+ * schemas, which a plain `Ajv` instance rejects because it only bundles the
+ * draft-07 meta-schema. Pick a validator per dialect so every common one compiles.
+ */
+type Draft = "2019-09" | "2020-12" | "draft-07";
+
+type Compiler = { compile(schema: unknown): ValidateFunction };
+
 const cache = new Map<string, ValidateFunction>();
+const compilers = new Map<Draft, Compiler>();
+
+function draftOf(schema: JsonSchema): Draft {
+  const declared = schema["$schema"];
+  const dialect = typeof declared === "string" ? declared.toLowerCase() : "";
+  if (dialect.includes("2020-12")) return "2020-12";
+  if (dialect.includes("2019-09")) return "2019-09";
+  return "draft-07";
+}
+
+function compilerFor(draft: Draft): Compiler {
+  const cached = compilers.get(draft);
+  if (cached) return cached;
+  const options = { allErrors: true, strict: false } as const;
+  const created: Compiler =
+    draft === "2020-12" ? new Ajv2020(options) : draft === "2019-09" ? new Ajv2019(options) : new Ajv(options);
+  compilers.set(draft, created);
+  return created;
+}
 
 export function validateArgs(
   schema: JsonSchema,
@@ -13,7 +43,7 @@ export function validateArgs(
   let validate = cache.get(key);
   if (!validate) {
     try {
-      validate = ajv.compile(schema);
+      validate = compilerFor(draftOf(schema)).compile(schema);
       cache.set(key, validate);
     } catch (error) {
       return {
