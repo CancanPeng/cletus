@@ -688,16 +688,50 @@ async function runTui(opts: {
     description,
     run: async (args) => {
       if (!session) return;
+      if (session.agent.state.isStreaming) {
+        app?.notify("Cannot run a skill while the agent is working", "warn");
+        return;
+      }
       const loaded = opts.resources.cached ?? (await opts.resources.load());
       const current = loaded.skills.find((candidate) => candidate.name === name);
       if (!current || !current.userInvocable || current.visibility === "off") {
         app?.notify(`Skill not available: ${name}`, "warn");
         return;
       }
-      const content = await readFile(current.path, "utf8");
-      await session.prompt(
-        `<skill name="${current.name}" path="${current.path}">\n${content}\n</skill>\n\n${args}`,
-      );
+      app?.appendBlock({
+        id: `skill-${Date.now()}`,
+        kind: "user",
+        text: `/${name}${args ? ` ${args}` : ""}`,
+      });
+      app?.notify(`Loading skill ${name}…`);
+      app?.setStatus({
+        busy: true,
+        model: session.model.ref ?? session.model.id,
+        tokens: "",
+        queue: session.agent.queuedMessageCount,
+        activity: `loading ${name}`,
+        context: contextLabel(session),
+      });
+      try {
+        const content = await readFile(current.path, "utf8");
+        app?.notify(`Running skill ${name}`);
+        await session.prompt(
+          `<skill name="${current.name}" path="${current.path}">\n${content}\n</skill>\n\n${args}`,
+        );
+      } catch (error) {
+        app?.notify(
+          error instanceof Error ? error.message : String(error),
+          "error",
+        );
+      } finally {
+        app?.setStatus({
+          busy: false,
+          model: session.model.ref ?? session.model.id,
+          tokens: "",
+          queue: session.agent.queuedMessageCount,
+          context: contextLabel(session),
+        });
+      }
     },
   });
   for (const skill of opts.resources.cached?.skills ?? []) {
