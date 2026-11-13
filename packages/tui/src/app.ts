@@ -826,6 +826,7 @@ export class TuiApp {
     const item = this.completionItems[this.completionIndex];
     if (!item) return;
     this.textarea?.setText(`/${item.name} `);
+    this.textarea?.gotoBufferEnd();
     this.hideCompletion();
   }
 

@@ -192,6 +192,19 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("keeps the cursor at the end after accepting a command", async () => {
+    const ctx = await setupApp();
+    ctx.mockInput.typeText("/te");
+    await ctx.flush();
+    ctx.mockInput.pressTab();
+    await ctx.flush();
+    ctx.mockInput.typeText("x");
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("/test x");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("manages list states in a popup", async () => {
     const ctx = await setupApp();
     const changes: Array<[string, string]> = [];
