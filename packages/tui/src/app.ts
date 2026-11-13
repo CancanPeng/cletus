@@ -78,6 +78,7 @@ type BlockView =
       box: BoxRenderable;
       title: TextRenderable;
       args: TextRenderable;
+      separator: TextRenderable;
       preview: TextRenderable;
       output: TextRenderable;
     }
@@ -765,8 +766,14 @@ export class TuiApp {
       });
       const args = new TextRenderable(this.renderer!, {
         content: block.argsSummary,
-        fg: this.color("muted"),
+        fg: this.color("tool"),
         wrapMode: "word",
+        width: "100%",
+      });
+      const separator = new TextRenderable(this.renderer!, {
+        content: "─".repeat(200),
+        fg: this.color("border"),
+        wrapMode: "none",
         width: "100%",
       });
       const preview = new TextRenderable(this.renderer!, {
@@ -779,16 +786,17 @@ export class TuiApp {
       });
       const output = new TextRenderable(this.renderer!, {
         content: block.output,
-        fg: this.color("muted"),
+        fg: block.isError ? this.color("error") : this.color("fg"),
         wrapMode: "word",
         width: "100%",
         visible: block.expanded,
       });
       box.add(title);
       box.add(args);
+      box.add(separator);
       box.add(preview);
       box.add(output);
-      return { kind: "tool", box, title, args, preview, output };
+      return { kind: "tool", box, title, args, separator, preview, output };
     }
     const text = new TextRenderable(this.renderer!, {
       content: `! ${block.text}`,
@@ -822,10 +830,13 @@ export class TuiApp {
       view.box.borderColor = this.toolColor(status);
       view.box.backgroundColor = this.toolBackground(status);
       view.args.content = block.argsSummary;
+      view.args.fg = this.color("tool");
+      view.separator.fg = this.color("border");
       view.preview.content = toolPreview(block.output, block.isError, this.symbol("preview"));
       view.preview.fg = block.isError ? this.color("error") : this.color("muted");
       view.preview.visible = !block.expanded;
       view.output.content = block.output;
+      view.output.fg = block.isError ? this.color("error") : this.color("fg");
       view.output.visible = block.expanded;
     } else if (view.kind === "notice" && block.kind === "notice") {
       view.text.content = `! ${block.text}`;

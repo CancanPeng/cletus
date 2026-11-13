@@ -363,7 +363,7 @@ async function runTui(opts: {
         id: `t${event.toolCallId}`,
         kind: "tool",
         name: event.toolName,
-        argsSummary: JSON.stringify(event.args).slice(0, 120),
+        argsSummary: JSON.stringify(event.args, null, 2) ?? "{}",
         output: "",
         isError: false,
         expanded: false,
