@@ -145,7 +145,7 @@ export class AgentSession {
     ];
   }
 
-  private refreshTools(): void {
+  refreshTools(): void {
     const tools: AgentTool[] = this.toolsFor(
       this.options.cwd,
       false,

@@ -634,6 +634,19 @@ async function runTui(opts: {
       context: contextLabel(session),
     });
   }
+  void opts.mcp
+    .start()
+    .then(() => {
+      session?.refreshTools();
+      const tools = opts.mcp.getTools().length;
+      if (tools > 0) app?.notify(`MCP ready · ${tools} tools`);
+    })
+    .catch((error: unknown) => {
+      app?.notify(
+        `MCP startup failed: ${error instanceof Error ? error.message : String(error)}`,
+        "warn",
+      );
+    });
   await done.promise;
   unsubscribe?.();
   await session?.dispose();
@@ -914,7 +927,6 @@ async function main(): Promise<number> {
   });
   if (!parsed.values["no-extensions"]) await extensions.load();
   const mcp = await McpManager.create(cwd, home, { trustProject });
-  await mcp.start();
 
   let manager: SessionManager;
   if (parsed.values.resume) {
@@ -934,6 +946,7 @@ async function main(): Promise<number> {
   try {
     if (parsed.values.json || parsed.values.print || (!process.stdout.isTTY && prompt)) {
       if (!prompt) throw new ConfigError("No prompt and stdin is not a TTY");
+      await mcp.start();
       return await runPrint({
         cwd,
         home,

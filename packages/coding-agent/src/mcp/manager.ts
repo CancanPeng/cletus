@@ -49,6 +49,7 @@ export class McpManager {
   private readonly cwd: string;
   private readonly home: string;
   private readonly trustProject: boolean;
+  private startPromise: Promise<void> | undefined;
 
   private constructor(cwd: string, home: string, trustProject: boolean) {
     this.cwd = cwd;
@@ -86,6 +87,7 @@ export class McpManager {
         : new StdioClientTransport({
             command: config.command ?? "",
             args: config.args ?? [],
+            stderr: "ignore",
             ...(config.env ? { env: config.env } : {}),
             ...(config.cwd ? { cwd: config.cwd } : {}),
           });
@@ -138,10 +140,12 @@ export class McpManager {
     }
   }
 
-  async start(): Promise<void> {
-    await Promise.allSettled(
+  start(): Promise<void> {
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = Promise.allSettled(
       [...this.servers.values()].map((state) => this.connectServer(state)),
-    );
+    ).then(() => undefined);
+    return this.startPromise;
   }
 
   getTools(): AgentTool[] {
@@ -162,6 +166,7 @@ export class McpManager {
 
   async reload(): Promise<void> {
     await this.dispose();
+    this.startPromise = undefined;
     this.servers.clear();
     const configs = await loadMcpConfig(this.cwd, this.home, this.trustProject);
     for (const [name, config] of Object.entries(configs)) {

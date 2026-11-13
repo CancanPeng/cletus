@@ -86,7 +86,7 @@ cletus skills disable demo
 - Skills: `~/.cletus/skills/**/SKILL.md`, `.cletus/skills`, `.agents/skills`.
 - Prompt templates: `~/.cletus/prompts/*.md`, `.cletus/prompts/*.md`.
 - Extensions: `~/.cletus/extensions/*.ts`, `.cletus/extensions/*.ts` (requires project trust).
-- MCP: `~/.cletus/mcp.json`, `.cletus/mcp.json`.
+- MCP: `~/.cletus/mcp.json`, `.cletus/mcp.json`. Servers connect in the background, so the TUI opens immediately; `MCP ready` appears when tools are registered.
 
 ## License
 
