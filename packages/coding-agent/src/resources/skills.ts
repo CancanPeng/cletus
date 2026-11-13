@@ -1,5 +1,6 @@
 import { chmod, glob, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { SkillVisibility } from "../config.js";
 import { findRepoRoot } from "./context-files.js";
@@ -62,14 +63,20 @@ export async function loadSkills(
   overrides: Record<string, SkillVisibility> = {},
 ): Promise<{ skills: Skill[]; roots: string[] }> {
   const root = await findRepoRoot(cwd);
+  const userHome = homedir();
   const dirs: Array<{ dir: string; source: SkillSource }> = [
     { dir: join(home, "skills"), source: "personal" },
+    { dir: join(home, ".agents", "skills"), source: "personal" },
+    { dir: join(userHome, ".agents", "skills"), source: "personal" },
+    { dir: join(userHome, ".claude", "skills"), source: "personal" },
     { dir: join(cwd, ".cletus", "skills"), source: "project" },
     { dir: join(cwd, ".agents", "skills"), source: "project" },
+    { dir: join(cwd, ".claude", "skills"), source: "project" },
   ];
   let current = cwd;
   for (;;) {
     dirs.push({ dir: join(current, ".agents", "skills"), source: "ancestor" });
+    dirs.push({ dir: join(current, ".claude", "skills"), source: "ancestor" });
     if (current === root) break;
     const parent = dirname(current);
     if (parent === current) break;
@@ -116,10 +123,7 @@ export async function loadSkills(
           ? meta["description"].trim()
           : firstLine(body);
       if (!name || !description) continue;
-      if (names.has(name)) {
-        process.stderr.write(`Warning: duplicate skill ${name}; keeping first\n`);
-        continue;
-      }
+      if (names.has(name)) continue;
       names.add(name);
       roots.add(dirname(real));
 
