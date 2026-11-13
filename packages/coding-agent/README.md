@@ -93,6 +93,33 @@ cletus skills enable demo
 cletus skills disable demo
 ```
 
+## Web search
+
+`web_search` is a built-in client tool backed by a sequential provider chain:
+
+```text
+brave → tavily → searxng → duckduckgo
+```
+
+- `BRAVE_API_KEY` enables Brave
+- `TAVILY_API_KEY` enables Tavily
+- `SEARXNG_ENDPOINT` enables a self-hosted SearXNG
+- DuckDuckGo HTML is keyless and is the final fallback
+
+Configure in `~/.cletus/config.json`:
+
+```json
+{
+  "webSearch": {
+    "enabled": true,
+    "order": ["brave", "tavily", "searxng", "duckduckgo"],
+    "timeoutSeconds": 30
+  }
+}
+```
+
+The tool supports `site:`, `-site:`, `filetype:` constraints and `recency` filters, returns titles/URLs/snippets, and requires confirmation unless `--yolo` is active. If the model has native Anthropic `webSearch` enabled, the client tool is omitted to avoid duplicate `web_search` declarations.
+
 ## Native web search
 
 For Anthropic Messages models, cletus can declare Anthropic's hosted `web_search` tool:

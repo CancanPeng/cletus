@@ -11,6 +11,11 @@ export class ConfigError extends Error {
 }
 
 export type CompactionConfig = { reserveTokens: number; keepRecentTokens: number };
+export type WebSearchConfig = {
+  enabled: boolean;
+  order: string[];
+  timeoutSeconds: number;
+};
 
 export type CletusConfig = {
   defaultModel?: string;
@@ -23,6 +28,7 @@ export type CletusConfig = {
     }
   >;
   compaction: CompactionConfig;
+  webSearch: WebSearchConfig;
   permissions: { allowWrite: string[] };
   tui: {
     showThinking: boolean;
@@ -56,6 +62,11 @@ export function createDefaultConfig(): CletusConfig {
     },
     models: [],
     compaction: { reserveTokens: 16384, keepRecentTokens: 20000 },
+    webSearch: {
+      enabled: true,
+      order: ["brave", "tavily", "searxng", "duckduckgo"],
+      timeoutSeconds: 30,
+    },
     permissions: { allowWrite: [] },
     tui: { showThinking: true, theme: "dark", keybindings: {} },
   };
@@ -90,6 +101,7 @@ export async function loadConfig(home = cletusHome(), path = configPath(home)): 
       ...parsed,
       providers: { ...createDefaultConfig().providers, ...parsed.providers },
       compaction: { ...createDefaultConfig().compaction, ...parsed.compaction },
+      webSearch: { ...createDefaultConfig().webSearch, ...parsed.webSearch },
       permissions: { ...createDefaultConfig().permissions, ...parsed.permissions },
       tui: { ...createDefaultConfig().tui, ...parsed.tui },
     };

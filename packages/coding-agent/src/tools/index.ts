@@ -1,5 +1,6 @@
 import type { AgentTool, ToolResult } from "@cletus/agent";
 import type { Model } from "@cletus/ai";
+import type { WebSearchConfig } from "../config.js";
 import type { PermissionPolicy } from "../permissions/policy.js";
 import { createBashTool } from "./bash.js";
 import { createEditTool } from "./edit.js";
@@ -8,6 +9,7 @@ import { createGrepTool } from "./grep.js";
 import { createLsTool } from "./ls.js";
 import { createReadTool } from "./read.js";
 import { createTaskTool, type SubagentRequest } from "./task.js";
+import { createWebSearchTool } from "./web-search.js";
 import { createWriteTool } from "./write.js";
 
 export type CoreToolDeps = {
@@ -16,6 +18,7 @@ export type CoreToolDeps = {
   home: string;
   model: Model;
   sessionId: string;
+  webSearch: WebSearchConfig;
 };
 
 export function createCoreTools(deps: CoreToolDeps): AgentTool[] {
@@ -33,6 +36,9 @@ export function createCoreTools(deps: CoreToolDeps): AgentTool[] {
     createGrepTool({ policy: deps.policy, cwd: deps.cwd }),
     createFindTool({ policy: deps.policy, cwd: deps.cwd }),
     createLsTool({ policy: deps.policy, cwd: deps.cwd }),
+    ...(deps.webSearch.enabled && !deps.model.webSearch
+      ? [createWebSearchTool({ config: deps.webSearch })]
+      : []),
   ];
 }
 

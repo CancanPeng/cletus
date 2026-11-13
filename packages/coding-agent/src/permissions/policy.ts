@@ -25,6 +25,7 @@ export class PermissionPolicy {
   private readonly sessionPaths = new Set<string>();
   private readonly sessionCommands = new Set<string>();
   private readonly sessionMcpTools = new Set<string>();
+  private readonly sessionSearches = new Set<string>();
 
   constructor(opts: {
     cwd: string;
@@ -53,6 +54,7 @@ export class PermissionPolicy {
     this.sessionPaths.clear();
     this.sessionCommands.clear();
     this.sessionMcpTools.clear();
+    this.sessionSearches.clear();
   }
 
   setAllowWrite(patterns: string[]): void {
@@ -151,6 +153,23 @@ export class PermissionPolicy {
     }
 
     if (toolName === "task") return { allow: true };
+
+    if (toolName === "web_search") {
+      if (this.yolo) return { allow: true };
+      const query = String(args["query"] ?? "");
+      if (this.sessionSearches.has(query)) return { allow: true };
+      if (!this.interactive) {
+        return { allow: false, reason: "Non-interactive mode requires --yolo for web search" };
+      }
+      const decision = await this.ask(
+        toolName,
+        args,
+        `Web search: ${query}`,
+        query,
+      );
+      if (decision.allow) this.sessionSearches.add(query);
+      return decision;
+    }
 
     if (toolName === "bash") {
       if (this.yolo) return { allow: true };

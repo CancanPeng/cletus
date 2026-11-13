@@ -1,0 +1,103 @@
+import { describe, expect, it } from "vitest";
+import {
+  filterSources,
+  parseQueryConstraints,
+  searchWeb,
+  type SearchProvider,
+} from "../src/web/search/index.js";
+import { parseDuckDuckGoHtml } from "../src/web/search/providers/duckduckgo.js";
+import { createWebSearchTool } from "../src/tools/web-search.js";
+
+const config = { enabled: true, order: ["a", "b"], timeoutSeconds: 5 };
+
+describe("web search", () => {
+  it("parses DuckDuckGo HTML results and redirects", () => {
+    const html = `
+      <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa&amp;rut=x">Example &amp; A</a>
+      <a class="result__snippet">Snippet <b>one</b></a>
+      <a class="result__a" href="https://example.org/b">Example B</a>
+      <div class="result__snippet">Snippet two</div>
+    `;
+    expect(parseDuckDuckGoHtml(html, 10)).toEqual([
+      {
+        title: "Example & A",
+        url: "https://example.com/a",
+        snippet: "Snippet one",
+      },
+      { title: "Example B", url: "https://example.org/b", snippet: "Snippet two" },
+    ]);
+  });
+
+  it("falls back to the next provider", async () => {
+    const failing: SearchProvider = {
+      id: "a",
+      label: "A",
+      isAvailable: () => true,
+      search: async () => {
+        throw new Error("boom");
+      },
+    };
+    const working: SearchProvider = {
+      id: "b",
+      label: "B",
+      isAvailable: () => true,
+      search: async () => ({
+        provider: "b",
+        sources: [{ title: "B", url: "https://example.com/b" }],
+      }),
+    };
+    const response = await searchWeb(
+      { query: "hello", limit: 5 },
+      [failing, working],
+      config,
+    );
+    expect(response.provider).toBe("b");
+  });
+
+  it("applies site and filetype constraints", () => {
+    const constraints = parseQueryConstraints(
+      "rust site:docs.rs filetype:html -site:example.com",
+    );
+    expect(constraints).toEqual({
+      includeSites: ["docs.rs"],
+      excludeSites: ["example.com"],
+      includeFileTypes: ["html"],
+    });
+    expect(
+      filterSources(
+        [
+          { title: "ok", url: "https://docs.rs/foo.html" },
+          { title: "wrong host", url: "https://example.org/foo.html" },
+          { title: "wrong type", url: "https://docs.rs/foo.pdf" },
+        ],
+        constraints,
+      ).map((source) => source.title),
+    ).toEqual(["ok"]);
+  });
+
+  it("returns a formatted tool result", async () => {
+    const provider: SearchProvider = {
+      id: "fake",
+      label: "Fake",
+      isAvailable: () => true,
+      search: async () => ({
+        provider: "fake",
+        answer: "Answer",
+        sources: [{ title: "Source", url: "https://example.com", snippet: "Text" }],
+      }),
+    };
+    const tool = createWebSearchTool({ config, providers: [provider] });
+    const result = await tool.execute(
+      { query: "q" },
+      {
+        cwd: process.cwd(),
+        toolCallId: "1",
+        signal: new AbortController().signal,
+        onUpdate: () => undefined,
+      },
+    );
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]?.text).toContain("Answer");
+    expect(result.content[0]?.text).toContain("https://example.com");
+  });
+});

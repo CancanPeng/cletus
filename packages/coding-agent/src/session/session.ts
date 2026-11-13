@@ -122,6 +122,7 @@ export class AgentSession {
       home: this.home,
       model: this.model,
       sessionId: this.manager.sessionId,
+      webSearch: this.options.config.webSearch,
     });
     if (excludeTask) return core;
     const subagent = createSubagentRunner({
