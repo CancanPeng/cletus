@@ -37,6 +37,10 @@ export type CletusConfig = {
     showThinking: boolean;
     theme: "dark" | "light" | "tokyo-night";
     keybindings: Record<string, string | string[]>;
+    symbols: {
+      preset: "unicode" | "nerd" | "ascii";
+      overrides: Record<string, string>;
+    };
   };
 };
 
@@ -72,7 +76,12 @@ export function createDefaultConfig(): CletusConfig {
     },
     skillOverrides: {},
     permissions: { allowWrite: [] },
-    tui: { showThinking: true, theme: "dark", keybindings: {} },
+    tui: {
+      showThinking: true,
+      theme: "dark",
+      keybindings: {},
+      symbols: { preset: "unicode", overrides: {} },
+    },
   };
 }
 
@@ -108,7 +117,18 @@ export async function loadConfig(home = cletusHome(), path = configPath(home)): 
       webSearch: { ...createDefaultConfig().webSearch, ...parsed.webSearch },
       skillOverrides: { ...createDefaultConfig().skillOverrides, ...parsed.skillOverrides },
       permissions: { ...createDefaultConfig().permissions, ...parsed.permissions },
-      tui: { ...createDefaultConfig().tui, ...parsed.tui },
+      tui: {
+        ...createDefaultConfig().tui,
+        ...parsed.tui,
+        symbols: {
+          ...createDefaultConfig().tui.symbols,
+          ...parsed.tui?.symbols,
+          overrides: {
+            ...createDefaultConfig().tui.symbols.overrides,
+            ...parsed.tui?.symbols?.overrides,
+          },
+        },
+      },
     };
   } catch (error) {
     throw new ConfigError(

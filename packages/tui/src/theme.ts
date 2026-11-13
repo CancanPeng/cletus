@@ -16,13 +16,91 @@ export type ThemeToken =
   | "inputText"
   | "inputPlaceholder";
 
+export type SymbolPreset = "unicode" | "nerd" | "ascii";
+export type SymbolKey =
+  | "app"
+  | "model"
+  | "cwd"
+  | "branch"
+  | "session"
+  | "ready"
+  | "context"
+  | "duration"
+  | "queue"
+  | "yolo"
+  | "permission"
+  | "skills"
+  | "search"
+  | "toolCollapsed"
+  | "toolExpanded"
+  | "preview";
+
 export type Theme = {
   name: "dark" | "light" | "tokyo-night";
   background: string;
   colors: Record<ThemeToken, string>;
+  symbols: Record<SymbolKey, string>;
+  symbol: (key: SymbolKey) => string;
 };
 
-const THEMES: Record<Theme["name"], Omit<Theme, "name">> = {
+const SYMBOLS: Record<SymbolPreset, Record<SymbolKey, string>> = {
+  unicode: {
+    app: "◆",
+    model: "◈",
+    cwd: "⌂",
+    branch: "⎇",
+    session: "▣",
+    ready: "✓ ready",
+    context: "▤",
+    duration: "◷",
+    queue: "≡",
+    yolo: "▲",
+    permission: "⚑",
+    skills: "❖",
+    search: "⌕",
+    toolCollapsed: "▸",
+    toolExpanded: "▾",
+    preview: "→",
+  },
+  nerd: {
+    app: "\uf120",
+    model: "\uf2db",
+    cwd: "\uf07b",
+    branch: "\ue725",
+    session: "\uf2c0",
+    ready: "\uf00c ready",
+    context: "\uf1c0",
+    duration: "\uf017",
+    queue: "\uf0c9",
+    yolo: "\uf0e7",
+    permission: "\uf023",
+    skills: "\uf085",
+    search: "\uf002",
+    toolCollapsed: "\uf0da",
+    toolExpanded: "\uf0d7",
+    preview: "\uf061",
+  },
+  ascii: {
+    app: "*",
+    model: "M",
+    cwd: "cwd",
+    branch: "git",
+    session: "id",
+    ready: "ready",
+    context: "ctx",
+    duration: "time",
+    queue: "q",
+    yolo: "!",
+    permission: "lock",
+    skills: "*",
+    search: "?",
+    toolCollapsed: ">",
+    toolExpanded: "v",
+    preview: ">",
+  },
+};
+
+const THEMES: Record<Theme["name"], Omit<Theme, "name" | "symbols" | "symbol">> = {
   dark: {
     background: "#16161e",
     colors: {
@@ -88,8 +166,31 @@ const THEMES: Record<Theme["name"], Omit<Theme, "name">> = {
   },
 };
 
-export function getTheme(name: string): Theme {
+export type SymbolConfig = {
+  preset?: SymbolPreset;
+  overrides?: Record<string, string>;
+};
+
+export function getTheme(name: string, symbols?: SymbolConfig): Theme {
   const key = name in THEMES ? (name as Theme["name"]) : "dark";
   if (key !== name) process.stderr.write(`Warning: unknown theme ${name}; using dark\n`);
-  return { name: key, ...THEMES[key] };
+  const presetName = symbols?.preset ?? "unicode";
+  const preset = presetName in SYMBOLS ? presetName : "unicode";
+  if (preset !== presetName) {
+    process.stderr.write(`Warning: unknown symbol preset ${presetName}; using unicode\n`);
+  }
+  const resolved: Record<SymbolKey, string> = {
+    ...SYMBOLS[preset],
+  };
+  for (const [keyName, value] of Object.entries(symbols?.overrides ?? {})) {
+    if (keyName in resolved && typeof value === "string") {
+      resolved[keyName as SymbolKey] = value;
+    }
+  }
+  return {
+    name: key,
+    ...THEMES[key],
+    symbols: resolved,
+    symbol: (symbolKey) => resolved[symbolKey],
+  };
 }

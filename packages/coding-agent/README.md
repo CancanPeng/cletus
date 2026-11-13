@@ -80,11 +80,32 @@ Keybinding changes apply on the next launch. `/theme` switches and persists imme
 
 Icons: `◆` app, `◈` model, `⌂` cwd, `⎇` git branch, `▣` session, `✓` ready, `▤` context usage, `◷` last duration, `≡` queued, `▲` YOLO, `⚑` permission, `❖` skills manager.
 
+Symbol presets:
+
+```text
+/symbols unicode   # default
+/symbols nerd      # Nerd Font glyphs
+/symbols ascii     # ASCII fallback
+```
+
+Configure in `~/.cletus/config.json`:
+
+```json
+{
+  "tui": {
+    "symbols": {
+      "preset": "unicode",
+      "overrides": { "ready": "OK" }
+    }
+  }
+}
+```
+
 ## Slash commands
 
 Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a command. `Enter` on a complete command such as `/quit` runs it immediately.
 
-`/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/keys`, `/skills`, `/permissions`, `/yolo`, `/mcp`, `/reload`, plus each user-invocable skill by its own name (for example `/using-git-worktrees`) and prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
+`/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/symbols`, `/keys`, `/skills`, `/permissions`, `/yolo`, `/mcp`, `/reload`, plus each user-invocable skill by its own name (for example `/using-git-worktrees`) and prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
 
 ## Skills
 

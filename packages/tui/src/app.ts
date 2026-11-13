@@ -12,7 +12,7 @@ import {
   type KeyEvent,
 } from "@opentui/core";
 import type { KeybindingsManager } from "./keybindings.js";
-import type { Theme, ThemeToken } from "./theme.js";
+import type { SymbolKey, Theme, ThemeToken } from "./theme.js";
 
 export type ManagedItem = {
   id: string;
@@ -89,11 +89,11 @@ type ModalState = {
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸"];
 
-function toolPreview(output: string, isError: boolean): string {
+function toolPreview(output: string, isError: boolean, arrow: string): string {
   const line = output.split("\n").map((item) => item.trim()).find((item) => item.length > 0);
-  if (!line) return isError ? "→ error" : "→ …";
+  if (!line) return isError ? `${arrow} error` : `${arrow} …`;
   const clipped = line.length > 118 ? `${line.slice(0, 118)}…` : line;
-  return `→ ${clipped}`;
+  return `${arrow} ${clipped}`;
 }
 
 export class TuiApp {
@@ -559,6 +559,10 @@ export class TuiApp {
     return this.theme.colors[token];
   }
 
+  private symbol(key: SymbolKey): string {
+    return this.theme.symbol(key);
+  }
+
   private baseBox(id: string): BoxRenderable {
     return new BoxRenderable(this.renderer!, {
       id,
@@ -615,7 +619,7 @@ export class TuiApp {
       box.borderColor = block.isError ? this.color("error") : this.color("tool");
       box.paddingLeft = 1;
       const title = new TextRenderable(this.renderer!, {
-        content: `${block.expanded ? "▾" : "▸"} ${block.name}`,
+        content: `${block.expanded ? this.symbol("toolExpanded") : this.symbol("toolCollapsed")} ${block.name}`,
         fg: block.isError ? this.color("error") : this.color("tool"),
         wrapMode: "none",
         truncate: true,
@@ -628,7 +632,7 @@ export class TuiApp {
         width: "100%",
       });
       const preview = new TextRenderable(this.renderer!, {
-        content: toolPreview(block.output, block.isError),
+        content: toolPreview(block.output, block.isError, this.symbol("preview")),
         fg: block.isError ? this.color("error") : this.color("muted"),
         wrapMode: "none",
         truncate: true,
@@ -672,11 +676,11 @@ export class TuiApp {
     } else if (view.kind === "assistant" && block.kind === "assistant") {
       view.markdown.content = block.text;
     } else if (view.kind === "tool" && block.kind === "tool") {
-      view.title.content = `${block.expanded ? "▾" : "▸"} ${block.name}`;
+      view.title.content = `${block.expanded ? this.symbol("toolExpanded") : this.symbol("toolCollapsed")} ${block.name}`;
       view.title.fg = block.isError ? this.color("error") : this.color("tool");
       view.box.borderColor = block.isError ? this.color("error") : this.color("tool");
       view.args.content = block.argsSummary;
-      view.preview.content = toolPreview(block.output, block.isError);
+      view.preview.content = toolPreview(block.output, block.isError, this.symbol("preview"));
       view.preview.fg = block.isError ? this.color("error") : this.color("muted");
       view.preview.visible = !block.expanded;
       view.output.content = block.output;
@@ -1002,25 +1006,25 @@ export class TuiApp {
   }
 
   private footerLeftContent(): string {
-    if (this.inputModal) return `⌕ ${this.inputModal.title}`;
-    if (this.manager) return "❖ managing skills";
+    if (this.inputModal) return `${this.symbol("search")} ${this.inputModal.title}`;
+    if (this.manager) return `${this.symbol("skills")} managing skills`;
     const usage = this.status.context
-      ? `▤ ${this.status.context}`
+      ? `${this.symbol("context")} ${this.status.context}`
       : this.status.tokens
-        ? `▤ ${this.status.tokens} tok`
+        ? `${this.symbol("context")} ${this.status.tokens} tok`
         : "";
-    if (this.modal) return "⚑ waiting for permission";
+    if (this.modal) return `${this.symbol("permission")} waiting for permission`;
     if (this.selectState) return "select an item";
     if (this.status.busy) {
       const activity = this.status.activity ?? "working";
       const suffix = [
         usage,
-        this.status.queue > 0 ? `≡ ${this.status.queue} queued` : "",
-        this.yolo ? "▲ YOLO" : "",
+        this.status.queue > 0 ? `${this.symbol("queue")} ${this.status.queue} queued` : "",
+        this.yolo ? `${this.symbol("yolo")} YOLO` : "",
       ].filter(Boolean).join(" · ");
       return `${SPINNER[this.spinner] ?? "⠋"} ${activity}${suffix ? ` · ${suffix}` : ""}`;
     }
-    return `✓ ready${usage ? ` · ${usage}` : ""}${this.status.duration ? ` · ◷ ${this.status.duration}` : ""}${this.yolo ? " · ▲ YOLO" : ""}`;
+    return `${this.symbol("ready")}${usage ? ` · ${usage}` : ""}${this.status.duration ? ` · ${this.symbol("duration")} ${this.status.duration}` : ""}${this.yolo ? ` · ${this.symbol("yolo")} YOLO` : ""}`;
   }
 
   private footerRightContent(): string {

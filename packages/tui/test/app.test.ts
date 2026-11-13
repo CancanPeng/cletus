@@ -84,6 +84,21 @@ describe("TuiApp", () => {
     await test.dispose();
   });
 
+  it("switches symbol presets", async () => {
+    const ctx = await setupApp();
+    const ascii = getTheme("dark", {
+      preset: "ascii",
+      overrides: { ready: "OK" },
+    });
+    expect(ascii.symbol("app")).toBe("*");
+    expect(ascii.symbol("ready")).toBe("OK");
+    ctx.app.setTheme(ascii);
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("OK");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("switches theme and reports keybinding conflicts", async () => {
     const ctx = await setupApp();
     ctx.app.setTheme(getTheme("light"));

@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { parseArgs } from "node:util";
 import type { AgentEvent, AgentMessage } from "@cletus/agent";
 import type { Model } from "@cletus/ai";
-import type { TuiApp as TuiAppType, SlashCommand } from "@cletus/tui";
+import type { TuiApp as TuiAppType, SlashCommand, Theme } from "@cletus/tui";
 import {
   ConfigError,
   authPath,
@@ -45,6 +45,7 @@ const BUILTIN_COMMANDS = [
   "compact",
   "model",
   "theme",
+  "symbols",
   "keys",
   "skills",
   "permissions",
@@ -184,16 +185,21 @@ function contextLabel(session: AgentSession): string {
   return `${shortTokens(usage.used)}/${shortTokens(usage.window)} ${Math.min(100, percent)}%`;
 }
 
-function headerFor(cwd: string, session: AgentSession, branch?: string): string {
+function headerFor(
+  cwd: string,
+  session: AgentSession,
+  branch: string | undefined,
+  theme: Theme,
+): string {
   const home = homedir();
   const shortCwd = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
   const parts = [
-    "◆ cletus",
-    `◈ ${session.model.ref ?? `${session.model.provider}/${session.model.id}`}`,
-    `⌂ ${shortCwd}`,
+    `${theme.symbol("app")} cletus`,
+    `${theme.symbol("model")} ${session.model.ref ?? `${session.model.provider}/${session.model.id}`}`,
+    `${theme.symbol("cwd")} ${shortCwd}`,
   ];
-  if (branch) parts.push(`⎇ ${branch}`);
-  parts.push(`▣ ${session.manager.sessionId.slice(0, 8)}`);
+  if (branch) parts.push(`${theme.symbol("branch")} ${branch}`);
+  parts.push(`${theme.symbol("session")} ${session.manager.sessionId.slice(0, 8)}`);
   return parts.join(" · ");
 }
 
@@ -247,6 +253,7 @@ async function runTui(opts: {
   yolo: boolean;
 }): Promise<number> {
   const { TuiApp, getTheme, KeybindingsManager } = await import("@cletus/tui");
+  let currentTheme = getTheme(opts.config.tui.theme, opts.config.tui.symbols);
   let app: TuiAppType | undefined;
   let session: AgentSession | undefined;
   let unsubscribe: (() => void) | undefined;
@@ -259,7 +266,7 @@ async function runTui(opts: {
 
   const refreshHeader = async (): Promise<void> => {
     branch = await gitBranch(opts.cwd);
-    if (session) app?.setHeader(headerFor(opts.cwd, session, branch));
+    if (session) app?.setHeader(headerFor(opts.cwd, session, branch, currentTheme));
   };
 
   const confirm = async (req: { summary: string }): Promise<"allow" | "session" | "deny"> =>
@@ -392,7 +399,7 @@ async function runTui(opts: {
       onNotice: (text, level) => app?.notify(text, level),
     });
     unsubscribe = session.subscribe(mapEvent);
-    app?.setHeader(headerFor(opts.cwd, session, branch));
+    app?.setHeader(headerFor(opts.cwd, session, branch, currentTheme));
   };
 
   const commands: SlashCommand[] = [
@@ -478,8 +485,31 @@ async function runTui(opts: {
           return;
         }
         opts.config.tui.theme = next;
-        app?.setTheme(getTheme(next));
+        currentTheme = getTheme(next, opts.config.tui.symbols);
+        app?.setTheme(currentTheme);
+        await refreshHeader();
         await writeJsonAtomic(configPath(opts.home), opts.config);
+      },
+    },
+    {
+      name: "symbols",
+      description: "Switch symbol preset (unicode, nerd, ascii)",
+      run: async (args) => {
+        const presets = ["unicode", "nerd", "ascii"] as const;
+        const current = opts.config.tui.symbols.preset;
+        const next = args
+          ? presets.find((preset) => preset === args)
+          : presets[(presets.indexOf(current) + 1) % presets.length];
+        if (!next) {
+          app?.notify(`Unknown symbol preset: ${args}`, "warn");
+          return;
+        }
+        opts.config.tui.symbols.preset = next;
+        currentTheme = getTheme(opts.config.tui.theme, opts.config.tui.symbols);
+        app?.setTheme(currentTheme);
+        await refreshHeader();
+        await writeJsonAtomic(configPath(opts.home), opts.config);
+        app?.notify(`Symbols: ${next}`);
       },
     },
     {
@@ -813,7 +843,7 @@ async function runTui(opts: {
   const keybindings = new KeybindingsManager(opts.config.tui.keybindings);
   app = new TuiApp({
     header: "cletus",
-    theme: getTheme(opts.config.tui.theme),
+    theme: currentTheme,
     keybindings,
     submit: async (text) => {
       if (!session) return;
