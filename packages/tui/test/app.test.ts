@@ -192,6 +192,29 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("manages list states in a popup", async () => {
+    const ctx = await setupApp();
+    const changes: Array<[string, string]> = [];
+    const done = ctx.app.manageItems(
+      "Skills",
+      [{ id: "review", label: "review · personal", state: "on", states: ["on", "off"] }],
+      (id, state) => {
+        changes.push([id, state]);
+      },
+    );
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("[on] review");
+    ctx.mockInput.typeText(" ");
+    await ctx.flush();
+    expect(changes).toEqual([["review", "off"]]);
+    expect(ctx.captureCharFrame()).toContain("[off] review");
+    ctx.mockInput.pressEscape();
+    await ctx.flush();
+    await expect(done).resolves.toBeUndefined();
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("renders assistant markdown and tool cards", async () => {
     const ctx = await setupApp();
     ctx.app.appendBlock({

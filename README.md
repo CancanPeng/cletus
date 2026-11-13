@@ -83,7 +83,7 @@ Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a
 
 ## Skills
 
-`/skills` opens an interactive manager inspired by Claude Code. Select a skill, then choose its visibility:
+`/skills` opens a single popup manager inspired by Claude Code. Use Up/Down to move, `Space` to cycle visibility, and `Enter` or `Esc` to close. Changes are saved immediately to `~/.cletus/config.json`.
 
 | State | Listed to model | `/skill:<name>` |
 |---|---|---|

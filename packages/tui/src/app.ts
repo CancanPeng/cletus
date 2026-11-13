@@ -13,6 +13,13 @@ import {
 import type { KeybindingsManager } from "./keybindings.js";
 import type { Theme, ThemeToken } from "./theme.js";
 
+export type ManagedItem = {
+  id: string;
+  label: string;
+  state: string;
+  states: string[];
+};
+
 export type SlashCommand = {
   name: string;
   description: string;
@@ -94,6 +101,17 @@ export class TuiApp {
   private completionRows: TextRenderable[] = [];
   private completionItems: SlashCommand[] = [];
   private completionIndex = 0;
+  private manager:
+    | {
+        title: string;
+        items: ManagedItem[];
+        index: number;
+        resolve: () => void;
+        onCycle: (id: string, state: string) => Promise<void> | void;
+      }
+    | undefined;
+  private managerBox: BoxRenderable | undefined;
+  private managerRows: TextRenderable[] = [];
   private syntaxStyle: SyntaxStyle | undefined;
   private theme: Theme;
   private header: string;
@@ -256,6 +274,8 @@ export class TuiApp {
     this.spinnerTimer = undefined;
     this.modal?.resolve("deny");
     this.modal = undefined;
+    this.manager?.resolve();
+    this.manager = undefined;
     this.selectState?.resolve(undefined);
     this.selectState = undefined;
     this.renderer?.keyInput.off("keypress", this.handleKey);
@@ -318,6 +338,10 @@ export class TuiApp {
       this.completionBox.backgroundColor = theme.background;
       this.completionBox.borderColor = theme.colors.border;
     }
+    if (this.managerBox) {
+      this.managerBox.backgroundColor = theme.background;
+      this.managerBox.borderColor = theme.colors.accent;
+    }
     if (this.completionItems.length > 0) this.renderCompletion();
     if (this.editorBox) {
       this.editorBox.backgroundColor = theme.colors.inputBg;
@@ -338,6 +362,7 @@ export class TuiApp {
       this.views.clear();
       this.rebuildBlocks();
     }
+    if (this.manager) this.renderManager();
     if (this.modal) this.renderModal();
     if (this.selectState) this.renderSelect();
     this.updateFooter();
@@ -350,6 +375,25 @@ export class TuiApp {
     this.blocks.clear();
     this.order.length = 0;
     this.scrollbox?.scrollTo(0);
+  }
+
+  manageItems(
+    title: string,
+    items: ManagedItem[],
+    onCycle: (id: string, state: string) => Promise<void> | void,
+  ): Promise<void> {
+    this.hideCompletion();
+    this.manager?.resolve();
+    const state = Promise.withResolvers<void>();
+    this.manager = {
+      title,
+      items: items.map((item) => ({ ...item })),
+      index: 0,
+      resolve: state.resolve,
+      onCycle,
+    };
+    this.renderManager();
+    return state.promise;
   }
 
   getKeybindings(): KeybindingsManager {
@@ -538,6 +582,10 @@ export class TuiApp {
   }
 
   private handleKey = (key: KeyEvent): void => {
+    if (this.manager) {
+      this.handleManagerKey(key);
+      return;
+    }
     if (this.modal) {
       this.handleModalKey(key);
       return;
@@ -825,6 +873,7 @@ export class TuiApp {
   }
 
   private footerLeftContent(): string {
+    if (this.manager) return "managing skills";
     const usage = this.status.context
       ? `ctx ${this.status.context}`
       : this.status.tokens
@@ -846,6 +895,7 @@ export class TuiApp {
 
   private footerRightContent(): string {
     const bindings = this.options.keybindings;
+    if (this.manager) return "↑↓ move · space cycle · enter/esc close";
     if (this.modal) {
       return `${bindings.get("modalAllow")[0]} allow · ${bindings.get("modalSession")[0]} session · ${bindings.get("modalDeny")[0]} deny`;
     }
@@ -868,6 +918,105 @@ export class TuiApp {
           ? this.color("accent")
           : this.color("success");
     this.footerRight.fg = this.color("muted");
+  }
+
+  private handleManagerKey(key: KeyEvent): void {
+    this.intercept(key);
+    const manager = this.manager;
+    if (!manager) return;
+    if (key.name === "escape" || key.name === "return") {
+      this.manager = undefined;
+      this.managerBox?.destroyRecursively();
+      this.managerBox = undefined;
+      this.managerRows = [];
+      manager.resolve();
+      this.textarea?.focus();
+      this.updateFooter();
+      return;
+    }
+    if (key.name === "up") {
+      manager.index = Math.max(0, manager.index - 1);
+      this.renderManager();
+      return;
+    }
+    if (key.name === "down") {
+      manager.index = Math.min(manager.items.length - 1, manager.index + 1);
+      this.renderManager();
+      return;
+    }
+    if (key.name === "space") {
+      const item = manager.items[manager.index];
+      if (!item || item.states.length === 0) return;
+      const index = item.states.indexOf(item.state);
+      item.state = item.states[(index + 1) % item.states.length] ?? item.states[0] ?? item.state;
+      this.renderManager();
+      void Promise.resolve(manager.onCycle(item.id, item.state)).catch((error: unknown) => {
+        this.notify(error instanceof Error ? error.message : String(error), "error");
+      });
+    }
+  }
+
+  private renderManager(): void {
+    if (!this.renderer || !this.root || !this.manager) return;
+    this.managerBox?.destroyRecursively();
+    this.textarea?.blur();
+    const manager = this.manager;
+    const visible = Math.min(10, manager.items.length);
+    const box = new BoxRenderable(this.renderer, {
+      id: "skills-manager",
+      position: "absolute",
+      top: "16%",
+      left: "10%",
+      width: "80%",
+      height: visible + 5,
+      border: true,
+      borderStyle: "rounded",
+      borderColor: this.color("accent"),
+      backgroundColor: this.theme.background,
+      paddingX: 1,
+      flexDirection: "column",
+      zIndex: 110,
+    });
+    box.add(
+      new TextRenderable(this.renderer, {
+        content: manager.title,
+        fg: this.color("accent"),
+        wrapMode: "none",
+        truncate: true,
+        width: "100%",
+      }),
+    );
+    const start = Math.max(0, Math.min(manager.index - 4, manager.items.length - visible));
+    const rows: TextRenderable[] = [];
+    for (let rowIndex = 0; rowIndex < visible; rowIndex += 1) {
+      const item = manager.items[start + rowIndex];
+      if (!item) continue;
+      const selected = start + rowIndex === manager.index;
+      const row = new TextRenderable(this.renderer, {
+        content: `${selected ? "› " : "  "}[${item.state}] ${item.label}`,
+        fg: selected ? this.color("accent") : this.color("fg"),
+        wrapMode: "none",
+        truncate: true,
+        width: "100%",
+      });
+      rows.push(row);
+      box.add(row);
+    }
+    box.add(
+      new TextRenderable(this.renderer, {
+        content: "Space cycle · Enter/Esc close",
+        fg: this.color("muted"),
+        wrapMode: "none",
+        truncate: true,
+        width: "100%",
+        marginTop: 1,
+      }),
+    );
+    this.root.add(box);
+    this.managerBox = box;
+    this.managerRows = rows;
+    this.updateFooter();
+    this.renderer.requestRender();
   }
 
   private handleModalKey(key: KeyEvent): void {

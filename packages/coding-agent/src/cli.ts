@@ -486,56 +486,28 @@ async function runTui(opts: {
           app?.notify("Cannot manage skills while running", "warn");
           return;
         }
-        const states: Array<{ label: string; value: SkillVisibility }> = [
-          { label: "On", value: "on" },
-          { label: "Name only", value: "name-only" },
-          { label: "User only", value: "user-invocable-only" },
-          { label: "Off", value: "off" },
-        ];
-        for (;;) {
-          const skills = opts.resources.cached?.skills ?? [];
-          if (skills.length === 0) {
-            app?.notify("No skills found", "warn");
-            return;
-          }
-          const name = await app?.select(
-            "Skills",
-            skills.map((skill) => ({
-              label: `[${skill.visibility}] ${skill.name} · ${skill.source} — ${skill.description}`,
-              value: skill.name,
-            })),
-          );
-          if (!name) return;
-          const skill = skills.find((candidate) => candidate.name === name);
-          if (!skill) return;
-          const action = await app?.select(
-            `Skill: ${name} [${skill.visibility}]`,
-            [
-              ...states.map((state) => ({
-                label: `Visibility: ${state.label}`,
-                value: state.value,
-              })),
-              { label: "Show path", value: "path" },
-              { label: "Reload skills", value: "reload" },
-            ],
-          );
-          if (!action) return;
-          if (action === "path") {
-            app?.notify(skill.path);
-            continue;
-          }
-          if (action === "reload") {
-            await session.reload();
-            app?.notify("Skills reloaded");
-            continue;
-          }
-          const visibility = action as SkillVisibility;
+        const loaded = await opts.resources.load();
+        if (loaded.skills.length === 0) {
+          app?.notify("No skills found", "warn");
+          return;
+        }
+        const items = loaded.skills.map((skill) => ({
+          id: skill.name,
+          label: `${skill.name} · ${skill.source} — ${skill.description}`,
+          state:
+            skill.visibility === "user-invocable-only"
+              ? "user-only"
+              : skill.visibility,
+          states: ["on", "name-only", "user-only", "off"],
+        }));
+        await app?.manageItems("Skills", items, async (name, state) => {
+          const visibility: SkillVisibility =
+            state === "user-only" ? "user-invocable-only" : state as SkillVisibility;
           opts.config.skillOverrides[name] = visibility;
           await writeJsonAtomic(configPath(opts.home), opts.config);
           opts.resources.setSkillOverrides(opts.config.skillOverrides);
-          await session.reload();
-          app?.notify(`${name}: ${visibility}`);
-        }
+        });
+        app?.notify("Skills saved");
       },
     },
     {
@@ -650,7 +622,8 @@ async function runTui(opts: {
       description: skill.description,
       run: async (args) => {
         if (!session) return;
-        const current = opts.resources.cached?.skills.find(
+        const loaded = opts.resources.cached ?? (await opts.resources.load());
+        const current = loaded.skills.find(
           (candidate) => candidate.name === skill.name,
         );
         if (!current || !current.userInvocable || current.visibility === "off") {
