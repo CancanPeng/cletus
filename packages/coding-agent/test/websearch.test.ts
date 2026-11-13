@@ -6,6 +6,9 @@ import {
   type SearchProvider,
 } from "../src/web/search/index.js";
 import { parseDuckDuckGoHtml } from "../src/web/search/providers/duckduckgo.js";
+import { parseParallelText } from "../src/web/search/providers/parallel.js";
+import { parseExaText } from "../src/web/search/providers/exa.js";
+import { parseFirecrawl } from "../src/web/search/providers/firecrawl.js";
 import { createWebSearchTool } from "../src/tools/web-search.js";
 import { createCoreTools } from "../src/tools/index.js";
 import { PermissionPolicy } from "../src/permissions/policy.js";
@@ -27,6 +30,61 @@ describe("web search", () => {
         snippet: "Snippet one",
       },
       { title: "Example B", url: "https://example.org/b", snippet: "Snippet two" },
+    ]);
+  });
+
+  it("parses keyless provider results", () => {
+    expect(
+      parseParallelText(
+        JSON.stringify({
+          search_id: "search_1",
+          results: [
+            {
+              title: "Parallel result",
+              url: "https://example.com/p",
+              excerpts: ["Parallel snippet"],
+            },
+          ],
+        }),
+        5,
+      ),
+    ).toEqual([
+      {
+        title: "Parallel result",
+        url: "https://example.com/p",
+        snippet: "Parallel snippet",
+      },
+    ]);
+    expect(
+      parseExaText(
+        "Title: Exa result\nURL: https://example.com/e\nPublished: N/A\nHighlights:\nExa snippet\n---\n",
+        5,
+      ),
+    ).toEqual([
+      { title: "Exa result", url: "https://example.com/e", snippet: "Exa snippet" },
+    ]);
+    expect(
+      parseFirecrawl(
+        {
+          success: true,
+          data: {
+            web: [
+              {
+                title: "Firecrawl result",
+                url: "https://example.com/f",
+                description: "Firecrawl snippet",
+              },
+            ],
+          },
+        },
+        5,
+      ),
+    ).toEqual([
+      {
+        title: "Firecrawl result",
+        url: "https://example.com/f",
+        snippet: "Firecrawl snippet",
+      },
     ]);
   });
 

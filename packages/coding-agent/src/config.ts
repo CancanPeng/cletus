@@ -64,7 +64,7 @@ export function createDefaultConfig(): CletusConfig {
     compaction: { reserveTokens: 16384, keepRecentTokens: 20000 },
     webSearch: {
       enabled: true,
-      order: ["brave", "tavily", "searxng", "duckduckgo"],
+      order: ["parallel", "exa", "firecrawl", "brave", "tavily", "searxng", "duckduckgo"],
       timeoutSeconds: 30,
     },
     permissions: { allowWrite: [] },

@@ -98,8 +98,10 @@ cletus skills disable demo
 `web_search` is a built-in client tool backed by a sequential provider chain:
 
 ```text
-brave → tavily → searxng → duckduckgo
+parallel → exa → firecrawl → brave → tavily → searxng → duckduckgo
 ```
+
+`parallel`, `exa`, and `firecrawl` use keyless endpoints and work without API keys.
 
 - `BRAVE_API_KEY` enables Brave
 - `TAVILY_API_KEY` enables Tavily
@@ -112,7 +114,7 @@ Configure in `~/.cletus/config.json`:
 {
   "webSearch": {
     "enabled": true,
-    "order": ["brave", "tavily", "searxng", "duckduckgo"],
+    "order": ["parallel", "exa", "firecrawl", "brave", "tavily", "searxng", "duckduckgo"],
     "timeoutSeconds": 30
   }
 }
