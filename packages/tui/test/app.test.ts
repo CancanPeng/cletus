@@ -264,6 +264,29 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("previews collapsed tool output and expands on toggle", async () => {
+    const ctx = await setupApp();
+    ctx.app.appendBlock({
+      id: "tool-preview",
+      kind: "tool",
+      name: "bash",
+      argsSummary: "npm test",
+      output: "line one\nline two",
+      isError: false,
+      expanded: false,
+    });
+    await ctx.flush();
+    let frame = ctx.captureCharFrame();
+    expect(frame).toContain("→ line one");
+    expect(frame).not.toContain("line two");
+    ctx.app.updateBlock("tool-preview", { expanded: true });
+    await ctx.flush();
+    frame = ctx.captureCharFrame();
+    expect(frame).toContain("line two");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("renders assistant markdown and tool cards", async () => {
     const ctx = await setupApp();
     ctx.app.appendBlock({

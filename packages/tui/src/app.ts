@@ -69,6 +69,7 @@ type BlockView =
       box: BoxRenderable;
       title: TextRenderable;
       args: TextRenderable;
+      preview: TextRenderable;
       output: TextRenderable;
     }
   | { kind: "notice"; box: BoxRenderable; text: TextRenderable };
@@ -87,6 +88,13 @@ type ModalState = {
 };
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸"];
+
+function toolPreview(output: string, isError: boolean): string {
+  const line = output.split("\n").map((item) => item.trim()).find((item) => item.length > 0);
+  if (!line) return isError ? "→ error" : "→ …";
+  const clipped = line.length > 118 ? `${line.slice(0, 118)}…` : line;
+  return `→ ${clipped}`;
+}
 
 export class TuiApp {
   private readonly options: TuiAppOptions;
@@ -608,6 +616,14 @@ export class TuiApp {
         wrapMode: "word",
         width: "100%",
       });
+      const preview = new TextRenderable(this.renderer!, {
+        content: toolPreview(block.output, block.isError),
+        fg: block.isError ? this.color("error") : this.color("muted"),
+        wrapMode: "none",
+        truncate: true,
+        width: "100%",
+        visible: !block.expanded,
+      });
       const output = new TextRenderable(this.renderer!, {
         content: block.output,
         fg: this.color("muted"),
@@ -617,8 +633,9 @@ export class TuiApp {
       });
       box.add(title);
       box.add(args);
+      box.add(preview);
       box.add(output);
-      return { kind: "tool", box, title, args, output };
+      return { kind: "tool", box, title, args, preview, output };
     }
     const text = new TextRenderable(this.renderer!, {
       content: `! ${block.text}`,
@@ -647,6 +664,9 @@ export class TuiApp {
       view.title.fg = block.isError ? this.color("error") : this.color("tool");
       view.box.borderColor = block.isError ? this.color("error") : this.color("tool");
       view.args.content = block.argsSummary;
+      view.preview.content = toolPreview(block.output, block.isError);
+      view.preview.fg = block.isError ? this.color("error") : this.color("muted");
+      view.preview.visible = !block.expanded;
       view.output.content = block.output;
       view.output.visible = block.expanded;
     } else if (view.kind === "notice" && block.kind === "notice") {
