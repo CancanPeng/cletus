@@ -188,12 +188,12 @@ function headerFor(cwd: string, session: AgentSession, branch?: string): string 
   const home = homedir();
   const shortCwd = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
   const parts = [
-    "cletus",
-    session.model.ref ?? `${session.model.provider}/${session.model.id}`,
-    shortCwd,
+    "◆ cletus",
+    `◈ ${session.model.ref ?? `${session.model.provider}/${session.model.id}`}`,
+    `⌂ ${shortCwd}`,
   ];
-  if (branch) parts.push(`git:${branch}`);
-  parts.push(session.manager.sessionId.slice(0, 8));
+  if (branch) parts.push(`⎇ ${branch}`);
+  parts.push(`▣ ${session.manager.sessionId.slice(0, 8)}`);
   return parts.join(" · ");
 }
 

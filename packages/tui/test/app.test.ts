@@ -128,7 +128,7 @@ describe("TuiApp", () => {
       context: "12.4k/128k 10%",
     });
     await ctx.flush();
-    expect(ctx.captureCharFrame()).toContain("ctx 12.4k/128k 10%");
+    expect(ctx.captureCharFrame()).toContain("▤ 12.4k/128k 10%");
     ctx.app.setStatus({
       busy: false,
       model: "openai/fake",

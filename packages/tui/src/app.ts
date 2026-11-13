@@ -1002,25 +1002,25 @@ export class TuiApp {
   }
 
   private footerLeftContent(): string {
-    if (this.inputModal) return this.inputModal.title;
-    if (this.manager) return "managing skills";
+    if (this.inputModal) return `⌕ ${this.inputModal.title}`;
+    if (this.manager) return "❖ managing skills";
     const usage = this.status.context
-      ? `ctx ${this.status.context}`
+      ? `▤ ${this.status.context}`
       : this.status.tokens
-        ? `${this.status.tokens} tok`
+        ? `▤ ${this.status.tokens} tok`
         : "";
-    if (this.modal) return "waiting for permission";
+    if (this.modal) return "⚑ waiting for permission";
     if (this.selectState) return "select an item";
     if (this.status.busy) {
       const activity = this.status.activity ?? "working";
       const suffix = [
         usage,
-        this.status.queue > 0 ? `${this.status.queue} queued` : "",
-        this.yolo ? "YOLO" : "",
+        this.status.queue > 0 ? `≡ ${this.status.queue} queued` : "",
+        this.yolo ? "▲ YOLO" : "",
       ].filter(Boolean).join(" · ");
       return `${SPINNER[this.spinner] ?? "⠋"} ${activity}${suffix ? ` · ${suffix}` : ""}`;
     }
-    return `● ready${usage ? ` · ${usage}` : ""}${this.status.duration ? ` · ${this.status.duration}` : ""}${this.yolo ? " · YOLO" : ""}`;
+    return `✓ ready${usage ? ` · ${usage}` : ""}${this.status.duration ? ` · ◷ ${this.status.duration}` : ""}${this.yolo ? " · ▲ YOLO" : ""}`;
   }
 
   private footerRightContent(): string {

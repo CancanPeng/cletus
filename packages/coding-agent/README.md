@@ -76,6 +76,10 @@ Override bindings in `~/.cletus/config.json` under `tui.keybindings`, for exampl
 
 Keybinding changes apply on the next launch. `/theme` switches and persists immediately.
 
+## Status bar
+
+Icons: `◆` app, `◈` model, `⌂` cwd, `⎇` git branch, `▣` session, `✓` ready, `▤` context usage, `◷` last duration, `≡` queued, `▲` YOLO, `⚑` permission, `❖` skills manager.
+
 ## Slash commands
 
 Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a command. `Enter` on a complete command such as `/quit` runs it immediately.
