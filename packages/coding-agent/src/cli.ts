@@ -507,6 +507,8 @@ async function runTui(opts: {
           await writeJsonAtomic(configPath(opts.home), opts.config);
           opts.resources.setSkillOverrides(opts.config.skillOverrides);
         });
+        await opts.resources.load();
+        syncSkillCommands();
         app?.notify("Skills saved");
       },
     },
@@ -611,33 +613,67 @@ async function runTui(opts: {
           return;
         }
         await session.reload();
+        await opts.resources.load();
+        syncSkillCommands();
         app?.notify("Reloaded");
       },
     },
   ];
 
+  const commandNames = new Set(commands.map((command) => command.name));
+  const skillCommands = new Map<string, SlashCommand>();
+  const makeSkillCommand = (name: string, description: string): SlashCommand => ({
+    name,
+    description,
+    run: async (args) => {
+      if (!session) return;
+      const loaded = opts.resources.cached ?? (await opts.resources.load());
+      const current = loaded.skills.find((candidate) => candidate.name === name);
+      if (!current || !current.userInvocable || current.visibility === "off") {
+        app?.notify(`Skill not available: ${name}`, "warn");
+        return;
+      }
+      const content = await readFile(current.path, "utf8");
+      await session.prompt(
+        `<skill name="${current.name}" path="${current.path}">\n${content}\n</skill>\n\n${args}`,
+      );
+    },
+  });
   for (const skill of opts.resources.cached?.skills ?? []) {
-    commands.push({
-      name: `skill:${skill.name}`,
-      description: skill.description,
-      run: async (args) => {
-        if (!session) return;
-        const loaded = opts.resources.cached ?? (await opts.resources.load());
-        const current = loaded.skills.find(
-          (candidate) => candidate.name === skill.name,
-        );
-        if (!current || !current.userInvocable || current.visibility === "off") {
-          app?.notify(`Skill not available: ${skill.name}`, "warn");
-          return;
-        }
-        const content = await readFile(current.path, "utf8");
-        await session.prompt(
-          `<skill name="${current.name}" path="${current.path}">\n${content}\n</skill>\n\n${args}`,
-        );
-      },
-    });
+    if (!skill.userInvocable || skill.visibility === "off") continue;
+    if (/\s/.test(skill.name) || commandNames.has(skill.name)) continue;
+    commandNames.add(skill.name);
+    const command = makeSkillCommand(skill.name, skill.description);
+    skillCommands.set(skill.name, command);
+    commands.push(command);
   }
+  const syncSkillCommands = (): void => {
+    const skills = opts.resources.cached?.skills ?? [];
+    for (const skill of skills) {
+      const visible = skill.userInvocable && skill.visibility !== "off";
+      const existing = skillCommands.get(skill.name);
+      if (!visible && existing) {
+        app?.removeCommand(skill.name);
+        skillCommands.delete(skill.name);
+        commandNames.delete(skill.name);
+        continue;
+      }
+      if (
+        visible &&
+        !existing &&
+        !commandNames.has(skill.name) &&
+        !/\s/.test(skill.name)
+      ) {
+        const command = makeSkillCommand(skill.name, skill.description);
+        skillCommands.set(skill.name, command);
+        commandNames.add(skill.name);
+        app?.addCommand(command);
+      }
+    }
+  };
   for (const prompt of opts.resources.cached?.prompts ?? []) {
+    if (commandNames.has(prompt.name)) continue;
+    commandNames.add(prompt.name);
     commands.push({
       name: prompt.name,
       description: prompt.description,
@@ -648,6 +684,8 @@ async function runTui(opts: {
     });
   }
   for (const command of opts.extensions.getCommands()) {
+    if (commandNames.has(command.name)) continue;
+    commandNames.add(command.name);
     commands.push({
       name: command.name,
       description: command.description,

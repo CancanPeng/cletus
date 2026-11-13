@@ -396,6 +396,16 @@ export class TuiApp {
     return state.promise;
   }
 
+  addCommand(command: SlashCommand): void {
+    if (this.options.commands.some((candidate) => candidate.name === command.name)) return;
+    this.options.commands.push(command);
+  }
+
+  removeCommand(name: string): void {
+    const index = this.options.commands.findIndex((command) => command.name === name);
+    if (index >= 0) this.options.commands.splice(index, 1);
+  }
+
   getKeybindings(): KeybindingsManager {
     return this.options.keybindings;
   }

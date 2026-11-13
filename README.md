@@ -79,13 +79,13 @@ Keybinding changes apply on the next launch. `/theme` switches and persists imme
 
 Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a command. `Enter` on a complete command such as `/quit` runs it immediately.
 
-`/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/keys`, `/skills`, `/permissions`, `/yolo`, `/mcp`, `/reload`, `/skill:<name>`, plus prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
+`/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/keys`, `/skills`, `/permissions`, `/yolo`, `/mcp`, `/reload`, plus each user-invocable skill by its own name (for example `/using-git-worktrees`) and prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
 
 ## Skills
 
 `/skills` opens a single popup manager inspired by Claude Code. Use Up/Down to move, `Space` to cycle visibility, and `Enter` or `Esc` to close. Changes are saved immediately to `~/.cletus/config.json`.
 
-| State | Listed to model | `/skill:<name>` |
+| State | Listed to model | `/<skill-name>` |
 |---|---|---|
 | `on` | name + description | yes |
 | `name-only` | name only | yes |
