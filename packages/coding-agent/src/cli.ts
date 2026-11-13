@@ -262,6 +262,7 @@ async function runTui(opts: {
   let blockCounter = 0;
   let conversationStart: number | undefined;
   let lastDuration: string | undefined;
+  const toolStarts = new Map<string, number>();
   let branch = await gitBranch(opts.cwd);
 
   const refreshHeader = async (): Promise<void> => {
@@ -323,6 +324,7 @@ async function runTui(opts: {
         activity: `running ${event.toolName}`,
         context: contextLabel(session),
       });
+      toolStarts.set(event.toolCallId, Date.now());
       app.appendBlock({
         id: `t${event.toolCallId}`,
         kind: "tool",
@@ -331,16 +333,21 @@ async function runTui(opts: {
         output: "",
         isError: false,
         expanded: false,
+        status: "running",
       });
     } else if (event.type === "tool_execution_update") {
       const text = event.partial.content.map((block) => block.text).join("");
       app.updateBlock(`t${event.toolCallId}`, { kind: "tool", output: text });
     } else if (event.type === "tool_execution_end") {
       const text = event.result.content.map((block) => block.text).join("");
+      const started = toolStarts.get(event.toolCallId);
+      toolStarts.delete(event.toolCallId);
       app.updateBlock(`t${event.toolCallId}`, {
         kind: "tool",
         output: text,
         isError: event.result.isError === true,
+        status: event.result.isError === true ? "error" : "success",
+        ...(started ? { duration: formatDuration(Date.now() - started) } : {}),
       });
       app.setStatus({
         busy: true,

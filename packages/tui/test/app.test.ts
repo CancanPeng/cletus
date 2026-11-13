@@ -293,6 +293,7 @@ describe("TuiApp", () => {
     });
     await ctx.flush();
     let frame = ctx.captureCharFrame();
+    expect(frame).toContain("✓ bash");
     expect(frame).toContain("→ line one");
     expect(frame).not.toContain("line two");
     ctx.app.updateBlock("tool-preview", { expanded: true });

@@ -58,6 +58,8 @@ export type TranscriptBlock =
       output: string;
       isError: boolean;
       expanded: boolean;
+      status?: "running" | "success" | "error";
+      duration?: string;
     }
   | { id: string; kind: "notice"; text: string; level: "info" | "warn" | "error" };
 
@@ -590,6 +592,40 @@ export class TuiApp {
     );
   }
 
+  private toolStatus(block: Extract<TranscriptBlock, { kind: "tool" }>): "running" | "success" | "error" {
+    return block.status ?? (block.isError ? "error" : block.output ? "success" : "running");
+  }
+
+  private toolColor(status: "running" | "success" | "error"): string {
+    return status === "error"
+      ? this.color("error")
+      : status === "success"
+        ? this.color("success")
+        : this.color("tool");
+  }
+
+  private toolBackground(status: "running" | "success" | "error"): string {
+    return status === "error"
+      ? this.color("toolErrorBg")
+      : status === "success"
+        ? this.color("toolSuccessBg")
+        : this.color("toolBg");
+  }
+
+  private toolTitle(block: Extract<TranscriptBlock, { kind: "tool" }>): string {
+    const status = this.toolStatus(block);
+    const icon =
+      status === "error"
+        ? this.symbol("toolError")
+        : status === "success"
+          ? this.symbol("toolSuccess")
+          : this.symbol("toolRunning");
+    const chevron = block.expanded
+      ? this.symbol("toolExpanded")
+      : this.symbol("toolCollapsed");
+    return `${chevron} ${icon} ${block.name}${block.duration ? ` · ${block.duration}` : ""}`;
+  }
+
   private createView(block: TranscriptBlock): BlockView {
     const box = this.baseBox(`block-${block.id}`);
     if (block.kind === "user") {
@@ -615,12 +651,16 @@ export class TuiApp {
       return { kind: "assistant", box, markdown };
     }
     if (block.kind === "tool") {
-      box.border = ["left"];
-      box.borderColor = block.isError ? this.color("error") : this.color("tool");
-      box.paddingLeft = 1;
+      const status = this.toolStatus(block);
+      box.border = true;
+      box.borderStyle = "rounded";
+      box.borderColor = this.toolColor(status);
+      box.backgroundColor = this.toolBackground(status);
+      box.paddingX = 1;
+      box.paddingY = 0;
       const title = new TextRenderable(this.renderer!, {
-        content: `${block.expanded ? this.symbol("toolExpanded") : this.symbol("toolCollapsed")} ${block.name}`,
-        fg: block.isError ? this.color("error") : this.color("tool"),
+        content: this.toolTitle(block),
+        fg: this.toolColor(status),
         wrapMode: "none",
         truncate: true,
         width: "100%",
@@ -676,9 +716,11 @@ export class TuiApp {
     } else if (view.kind === "assistant" && block.kind === "assistant") {
       view.markdown.content = block.text;
     } else if (view.kind === "tool" && block.kind === "tool") {
-      view.title.content = `${block.expanded ? this.symbol("toolExpanded") : this.symbol("toolCollapsed")} ${block.name}`;
-      view.title.fg = block.isError ? this.color("error") : this.color("tool");
-      view.box.borderColor = block.isError ? this.color("error") : this.color("tool");
+      const status = this.toolStatus(block);
+      view.title.content = this.toolTitle(block);
+      view.title.fg = this.toolColor(status);
+      view.box.borderColor = this.toolColor(status);
+      view.box.backgroundColor = this.toolBackground(status);
       view.args.content = block.argsSummary;
       view.preview.content = toolPreview(block.output, block.isError, this.symbol("preview"));
       view.preview.fg = block.isError ? this.color("error") : this.color("muted");

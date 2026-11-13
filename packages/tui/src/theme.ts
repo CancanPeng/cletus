@@ -14,7 +14,10 @@ export type ThemeToken =
   | "inputBorder"
   | "inputFocus"
   | "inputText"
-  | "inputPlaceholder";
+  | "inputPlaceholder"
+  | "toolBg"
+  | "toolSuccessBg"
+  | "toolErrorBg";
 
 export type SymbolPreset = "unicode" | "nerd" | "ascii";
 export type SymbolKey =
@@ -33,7 +36,10 @@ export type SymbolKey =
   | "search"
   | "toolCollapsed"
   | "toolExpanded"
-  | "preview";
+  | "preview"
+  | "toolRunning"
+  | "toolSuccess"
+  | "toolError";
 
 export type Theme = {
   name: "dark" | "light" | "tokyo-night";
@@ -61,6 +67,9 @@ const SYMBOLS: Record<SymbolPreset, Record<SymbolKey, string>> = {
     toolCollapsed: "▸",
     toolExpanded: "▾",
     preview: "→",
+    toolRunning: "◌",
+    toolSuccess: "✓",
+    toolError: "✗",
   },
   nerd: {
     app: "\uf120",
@@ -79,6 +88,9 @@ const SYMBOLS: Record<SymbolPreset, Record<SymbolKey, string>> = {
     toolCollapsed: "\uf0da",
     toolExpanded: "\uf0d7",
     preview: "\uf061",
+    toolRunning: "\uf110",
+    toolSuccess: "\uf00c",
+    toolError: "\uf00d",
   },
   ascii: {
     app: "*",
@@ -97,6 +109,9 @@ const SYMBOLS: Record<SymbolPreset, Record<SymbolKey, string>> = {
     toolCollapsed: ">",
     toolExpanded: "v",
     preview: ">",
+    toolRunning: "...",
+    toolSuccess: "ok",
+    toolError: "ERR",
   },
 };
 
@@ -120,6 +135,9 @@ const THEMES: Record<Theme["name"], Omit<Theme, "name" | "symbols" | "symbol">> 
       inputFocus: "#7aa2f7",
       inputText: "#c0caf5",
       inputPlaceholder: "#565f89",
+      toolBg: "#1f2335",
+      toolSuccessBg: "#1b2b2b",
+      toolErrorBg: "#2d1f2a",
     },
   },
   light: {
@@ -141,6 +159,9 @@ const THEMES: Record<Theme["name"], Omit<Theme, "name" | "symbols" | "symbol">> 
       inputFocus: "#2e7de9",
       inputText: "#1f2335",
       inputPlaceholder: "#6b7089",
+      toolBg: "#f1f3f8",
+      toolSuccessBg: "#eef8ee",
+      toolErrorBg: "#fceef1",
     },
   },
   "tokyo-night": {
@@ -162,6 +183,9 @@ const THEMES: Record<Theme["name"], Omit<Theme, "name" | "symbols" | "symbol">> 
       inputFocus: "#7aa2f7",
       inputText: "#c0caf5",
       inputPlaceholder: "#565f89",
+      toolBg: "#1f2335",
+      toolSuccessBg: "#1b2b2b",
+      toolErrorBg: "#2d1f2a",
     },
   },
 };
