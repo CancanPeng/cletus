@@ -48,8 +48,21 @@ export function createBashTool(deps: {
         });
         let output = "";
         let finished = false;
+        let lastUpdate = 0;
+        const pushUpdate = (): void => {
+          if (finished) return;
+          const now = Date.now();
+          if (now - lastUpdate < 100) return;
+          lastUpdate = now;
+          const text = output.length > 20_000 ? truncateTail(output).text : output;
+          ctx.onUpdate({
+            content: [{ type: "text", text }],
+            details: { streaming: true },
+          });
+        };
         const append = (chunk: Buffer): void => {
           output += chunk.toString("utf8");
+          pushUpdate();
         };
         child.stdout.on("data", append);
         child.stderr.on("data", append);

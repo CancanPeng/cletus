@@ -54,6 +54,8 @@ In the TUI use `/permissions list`, `/permissions add src/**`, `/permissions rem
 
 `/thinking` toggles model reasoning output (`/thinking on` / `/thinking off`). It is persisted as `tui.showThinking`; thinking text is rendered before the final answer with the muted color.
 
+Bash stdout/stderr streams into the tool card while the command runs (up to every 100ms). Use `Ctrl+O` or `/verbose` to keep the card expanded and watch the full stream.
+
 `/verbose` toggles full tool output for the current session (`/verbose on` and `/verbose off` set it explicitly). The status bar shows `verbose` while active; `Ctrl+O` is the keyboard shortcut.
 
 `/yolo` toggles YOLO mode for the current session; `/yolo on` and `/yolo off` set it explicitly. The status bar shows `YOLO` while it is active. `/new` and `/resume` restore the startup mode (`--yolo` or off).
