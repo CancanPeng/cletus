@@ -34,6 +34,23 @@ describe("permission policy", () => {
     await expect(policy.resolveRead("link.txt")).rejects.toThrow("outside allowed roots");
   });
 
+  it("updates the persistent write allowlist at runtime", async () => {
+    const cwd = await temp();
+    const policy = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: false,
+    });
+    expect((await policy.check("write", { path: "src/a.ts", content: "x" })).allow).toBe(false);
+    policy.setAllowWrite(["src/**"]);
+    expect((await policy.check("write", { path: "src/a.ts", content: "x" })).allow).toBe(true);
+    expect((await policy.check("write", { path: "other/a.ts", content: "x" })).allow).toBe(false);
+    policy.setAllowWrite([]);
+    expect((await policy.check("write", { path: "src/a.ts", content: "x" })).allow).toBe(false);
+  });
+
   it("rejects .git writes and non-interactive writes without yolo", async () => {
     const cwd = await temp();
     await mkdir(join(cwd, ".git"), { recursive: true });

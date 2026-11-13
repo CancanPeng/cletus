@@ -45,6 +45,7 @@ const BUILTIN_COMMANDS = [
   "theme",
   "keys",
   "skills",
+  "permissions",
   "mcp",
   "reload",
 ];
@@ -72,6 +73,7 @@ Subcommands:
   cletus mcp add|list|remove
   cletus sessions list
   cletus skills list|enable|disable
+  cletus permissions list|add|remove|reset
   cletus import-pi [--from <piHome>] [--force]`;
 }
 
@@ -523,6 +525,61 @@ async function runTui(opts: {
       },
     },
     {
+      name: "permissions",
+      description: "Manage persistent write allowlist",
+      run: async (args) => {
+        const body = args.trim();
+        const space = body.indexOf(" ");
+        const action = space < 0 ? body || "list" : body.slice(0, space);
+        const rule = space < 0 ? "" : body.slice(space + 1).trim();
+        const rules = opts.config.permissions.allowWrite;
+        if (action === "list") {
+          app?.notify(
+            rules.length === 0
+              ? "No persistent write rules"
+              : `Persistent write rules:\n${rules.map((item) => `  ${item}`).join("\n")}`,
+          );
+          return;
+        }
+        if (action === "add") {
+          if (!rule) {
+            app?.notify("Usage: /permissions add <glob>", "warn");
+            return;
+          }
+          if (rules.includes(rule)) {
+            app?.notify(`Already allowed: ${rule}`);
+            return;
+          }
+          rules.push(rule);
+        } else if (action === "remove") {
+          if (!rule) {
+            app?.notify("Usage: /permissions remove <glob>", "warn");
+            return;
+          }
+          const index = rules.indexOf(rule);
+          if (index < 0) {
+            app?.notify(`Rule not found: ${rule}`, "warn");
+            return;
+          }
+          rules.splice(index, 1);
+        } else if (action === "reset") {
+          rules.length = 0;
+        } else {
+          app?.notify("Usage: /permissions list|add|remove|reset", "warn");
+          return;
+        }
+        await writeJsonAtomic(configPath(opts.home), opts.config);
+        policy.setAllowWrite(rules);
+        app?.notify(
+          action === "add"
+            ? `Allowed writes: ${rule}${opts.yolo ? " (yolo is enabled)" : ""}`
+            : action === "remove"
+              ? `Removed write rule: ${rule}`
+              : "Reset persistent write rules",
+        );
+      },
+    },
+    {
       name: "mcp",
       description: "Show MCP server status",
       run: () => {
@@ -838,6 +895,41 @@ async function skillsCommand(argv: string[]): Promise<number> {
   throw new ConfigError("Usage: cletus skills list|enable|disable");
 }
 
+async function permissionsCommand(argv: string[]): Promise<number> {
+  const home = cletusHome();
+  const config = await loadConfig(home);
+  const action = argv[0] ?? "list";
+  const rule = argv.slice(1).join(" ").trim();
+  const rules = config.permissions.allowWrite;
+  if (action === "list") {
+    if (rules.length === 0) process.stdout.write("No persistent write rules\n");
+    else for (const item of rules) process.stdout.write(`${item}\n`);
+    return 0;
+  }
+  if (action === "add") {
+    if (!rule) throw new ConfigError("Usage: cletus permissions add <glob>");
+    if (rules.includes(rule)) {
+      process.stdout.write(`Already allowed: ${rule}\n`);
+      return 0;
+    }
+    rules.push(rule);
+  } else if (action === "remove") {
+    if (!rule) throw new ConfigError("Usage: cletus permissions remove <glob>");
+    const index = rules.indexOf(rule);
+    if (index < 0) throw new ConfigError(`Rule not found: ${rule}`);
+    rules.splice(index, 1);
+  } else if (action === "reset") {
+    rules.length = 0;
+  } else {
+    throw new ConfigError("Usage: cletus permissions list|add|remove|reset");
+  }
+  await writeJsonAtomic(configPath(home), config);
+  process.stdout.write(
+    `${action === "add" ? "Allowed" : action === "remove" ? "Removed" : "Reset"} ${rule || "write rules"}\n`,
+  );
+  return 0;
+}
+
 async function importCommand(argv: string[]): Promise<number> {
   const parsed = parseArgs({
     args: argv,
@@ -863,6 +955,7 @@ async function main(): Promise<number> {
   if (argv[0] === "mcp") return mcpCommand(argv.slice(1));
   if (argv[0] === "sessions") return sessionsCommand(argv.slice(1));
   if (argv[0] === "skills") return skillsCommand(argv.slice(1));
+  if (argv[0] === "permissions") return permissionsCommand(argv.slice(1));
   if (argv[0] === "import-pi") return importCommand(argv.slice(1));
 
   const parsed = parseArgs({

@@ -1,5 +1,5 @@
-import { matchesGlob } from "node:path";
-import { resolveRead, resolveWrite, type SandboxOptions } from "./sandbox.js";
+import { matchesGlob, resolve } from "node:path";
+import { realResolve, resolveRead, resolveWrite, type SandboxOptions } from "./sandbox.js";
 
 export type PermissionRequest = {
   toolName: string;
@@ -18,7 +18,7 @@ const READ_TOOLS: Record<string, true> = {
 
 export class PermissionPolicy {
   private readonly sandbox: SandboxOptions;
-  private readonly allowWrite: string[];
+  private allowWrite: string[];
   readonly yolo: boolean;
   private readonly interactive: boolean;
   private readonly confirm: ConfirmFn | undefined;
@@ -35,9 +35,7 @@ export class PermissionPolicy {
     confirm?: ConfirmFn;
   }) {
     this.sandbox = { cwd: opts.cwd, readOnlyRoots: opts.readOnlyRoots };
-    this.allowWrite = opts.allowWrite.map((pattern) =>
-      pattern.startsWith("/") ? pattern : `${opts.cwd}/${pattern}`,
-    );
+    this.allowWrite = [...opts.allowWrite];
     this.yolo = opts.yolo;
     this.interactive = opts.interactive;
     this.confirm = opts.confirm;
@@ -57,19 +55,28 @@ export class PermissionPolicy {
     this.sessionMcpTools.clear();
   }
 
+  setAllowWrite(patterns: string[]): void {
+    this.allowWrite = [...patterns];
+  }
+
   resolveWrite(input: string): Promise<string> {
     return resolveWrite(this.sandbox, input);
   }
 
-  private isWriteAllowed(path: string): boolean {
+  private async isWriteAllowed(path: string): Promise<boolean> {
     if (this.sessionPaths.has(path)) return true;
-    return this.allowWrite.some((pattern) => {
+    for (const pattern of this.allowWrite) {
+      const absolute = pattern.startsWith("/")
+        ? pattern
+        : resolve(this.sandbox.cwd, pattern);
       try {
-        return matchesGlob(path, pattern);
+        const resolvedPattern = await realResolve(absolute);
+        if (matchesGlob(path, resolvedPattern)) return true;
       } catch {
-        return path.startsWith(pattern);
+        if (path.startsWith(absolute)) return true;
       }
-    });
+    }
+    return false;
   }
 
   private async ask(
@@ -109,7 +116,7 @@ export class PermissionPolicy {
       } catch (error) {
         return { allow: false, reason: error instanceof Error ? error.message : String(error) };
       }
-      if (this.isWriteAllowed(resolved)) return { allow: true };
+      if (await this.isWriteAllowed(resolved)) return { allow: true };
       if (this.yolo) return { allow: true };
       if (!this.interactive) {
         return { allow: false, reason: "Non-interactive mode requires --yolo for write" };

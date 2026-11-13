@@ -10,7 +10,7 @@ function isInside(parent: string, child: string): boolean {
   return child === parent || child.startsWith(parent.endsWith(sep) ? parent : `${parent}${sep}`);
 }
 
-async function realResolve(target: string): Promise<string> {
+export async function realResolve(target: string): Promise<string> {
   const absolute = resolve(target);
   const tail: string[] = [];
   let current = absolute;

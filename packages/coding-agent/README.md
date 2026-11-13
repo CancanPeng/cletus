@@ -41,6 +41,17 @@ cletus --json -p "List the TODOs" | jq .
 
 Read tools are confined to the working directory plus configured skill/prompt roots. Writes and command execution require confirmation. `--yolo` disables confirmations; use it only in trusted workspaces. Non-interactive `-p`/`--json` runs deny writes and commands unless `--yolo` is passed.
 
+Persistent write allowlist (glob patterns relative to the current cwd):
+
+```bash
+cletus permissions list
+cletus permissions add 'src/**'
+cletus permissions remove 'src/**'
+cletus permissions reset
+```
+
+In the TUI use `/permissions list`, `/permissions add src/**`, `/permissions remove src/**`, `/permissions reset`. Matching writes skip confirmation, but still stay inside the cwd and can never modify `.git`.
+
 ## Keys
 
 | Key | Action |
@@ -66,7 +77,7 @@ Keybinding changes apply on the next launch. `/theme` switches and persists imme
 
 Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a command. `Enter` on a complete command such as `/quit` runs it immediately.
 
-`/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/keys`, `/skills`, `/mcp`, `/reload`, `/skill:<name>`, plus prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
+`/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/keys`, `/skills`, `/permissions`, `/mcp`, `/reload`, `/skill:<name>`, plus prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
 
 ## Skills
 
