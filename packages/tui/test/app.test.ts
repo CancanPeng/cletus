@@ -84,6 +84,13 @@ describe("TuiApp", () => {
     await test.dispose();
   });
 
+  it("matches clipboard keybindings", () => {
+    const bindings = new KeybindingsManager();
+    expect(bindings.matches({ name: "c", super: true }, "copy")).toBe(true);
+    expect(bindings.matches({ name: "v", super: true }, "paste")).toBe(true);
+    expect(bindings.matches({ name: "v", ctrl: true, shift: true }, "paste")).toBe(true);
+  });
+
   it("switches symbol presets", async () => {
     const ctx = await setupApp();
     const ascii = getTheme("dark", {

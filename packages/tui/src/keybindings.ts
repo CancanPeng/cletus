@@ -14,7 +14,9 @@ export type Action =
   | "historyNext"
   | "modalAllow"
   | "modalSession"
-  | "modalDeny";
+  | "modalDeny"
+  | "copy"
+  | "paste";
 
 const DEFAULTS: Record<Action, string[]> = {
   submit: ["enter"],
@@ -33,6 +35,8 @@ const DEFAULTS: Record<Action, string[]> = {
   modalAllow: ["y"],
   modalSession: ["a"],
   modalDeny: ["n"],
+  copy: ["super+c", "ctrl+shift+c"],
+  paste: ["super+v", "ctrl+shift+v", "ctrl+v"],
 };
 
 const ALIASES: Record<string, string> = {
@@ -49,6 +53,7 @@ export type KeyLike = {
   shift?: boolean;
   meta?: boolean;
   option?: boolean;
+  super?: boolean;
 };
 
 function normalize(binding: string): string {
@@ -59,6 +64,7 @@ function normalize(binding: string): string {
 function keyId(key: KeyLike): string {
   const name = ALIASES[key.name.toLowerCase()] ?? key.name.toLowerCase();
   if (key.ctrl) return `ctrl+${name}`;
+  if (key.super) return `super+${name}`;
   if (key.meta || key.option) return `alt+${name}`;
   if (key.shift) return `shift+${name}`;
   return name;

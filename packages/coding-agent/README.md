@@ -71,6 +71,8 @@ Bash stdout/stderr streams into the tool card while the command runs (up to ever
 | Ctrl+O | toggle tool output |
 | PgUp/PgDown | scroll transcript |
 | Mouse wheel | scroll transcript; auto-follow pauses when scrolled up |
+| Cmd+C / Ctrl+Shift+C | copy selected text, or the whole input if nothing is selected |
+| Cmd+V / Ctrl+Shift+V / Ctrl+V | paste from the host clipboard |
 | Tab | complete slash command |
 | Up/Down | history (empty input) |
 

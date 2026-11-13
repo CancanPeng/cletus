@@ -3,6 +3,10 @@ import {
   CliRenderEvents,
   InputRenderable,
   MarkdownRenderable,
+  createClipboard,
+  createHostClipboard,
+  createRendererClipboardAdapter,
+  type ClipboardService,
   ScrollBoxRenderable,
   SyntaxStyle,
   TextRenderable,
@@ -171,6 +175,7 @@ export class TuiApp {
   private spinnerTimer: NodeJS.Timeout | undefined;
   private toolSpinner = 0;
   private toolTicker: NodeJS.Timeout | undefined;
+  private clipboard: ClipboardService | undefined;
   private readonly blocks = new Map<string, TranscriptBlock>();
   private readonly order: string[] = [];
   private readonly views = new Map<string, BlockView>();
@@ -322,6 +327,8 @@ export class TuiApp {
     this.spinnerTimer = undefined;
     clearInterval(this.toolTicker);
     this.toolTicker = undefined;
+    void this.clipboard?.dispose();
+    this.clipboard = undefined;
     this.modal?.resolve("deny");
     this.modal = undefined;
     this.manager?.resolve();
@@ -894,6 +901,16 @@ export class TuiApp {
       }
       return;
     }
+    if (bindings.matches(key, "copy")) {
+      this.intercept(key);
+      void this.copyText();
+      return;
+    }
+    if (bindings.matches(key, "paste")) {
+      this.intercept(key);
+      void this.pasteText();
+      return;
+    }
     if (bindings.matches(key, "cancel")) {
       this.intercept(key);
       if (this.status.busy) this.options.abort();
@@ -1331,6 +1348,62 @@ export class TuiApp {
     this.managerRows = rows;
     this.updateFooter();
     this.renderer.requestRender();
+  }
+
+  private getClipboard(): ClipboardService | undefined {
+    if (!this.renderer) return undefined;
+    if (!this.clipboard) {
+      this.clipboard = createClipboard({
+        host: createHostClipboard(),
+        terminal: createRendererClipboardAdapter(this.renderer),
+      });
+    }
+    return this.clipboard;
+  }
+
+  private async copyText(): Promise<void> {
+    const textarea = this.textarea;
+    if (!textarea) return;
+    const text = textarea.hasSelection()
+      ? textarea.getSelectedText()
+      : textarea.plainText;
+    if (!text) {
+      this.notify("Nothing to copy", "warn");
+      return;
+    }
+    const clipboard = this.getClipboard();
+    if (!clipboard) return;
+    try {
+      const result = await clipboard.writeText(text, { destination: "best-available" });
+      if (result.host.status === "written" || result.terminal.status === "attempted") {
+        this.notify(`Copied ${text.length} chars`);
+      } else {
+        this.notify("Clipboard write failed", "warn");
+      }
+    } catch (error) {
+      this.notify(error instanceof Error ? error.message : String(error), "error");
+    }
+  }
+
+  private async pasteText(): Promise<void> {
+    const textarea = this.textarea;
+    if (!textarea) return;
+    const clipboard = this.getClipboard();
+    if (!clipboard) return;
+    try {
+      const result = await clipboard.read({ preferredTypes: ["text/plain"] });
+      if (result.status !== "read") {
+        this.notify(
+          result.status === "empty" ? "Clipboard is empty" : `Clipboard read: ${result.status}`,
+          "warn",
+        );
+        return;
+      }
+      const text = new TextDecoder().decode(result.representation.bytes);
+      if (text) textarea.insertText(text);
+    } catch (error) {
+      this.notify(error instanceof Error ? error.message : String(error), "error");
+    }
   }
 
   private handleModalKey(key: KeyEvent): void {
