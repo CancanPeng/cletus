@@ -143,6 +143,10 @@ cletus skills enable demo   # alias for on
 cletus skills disable demo  # alias for off
 ```
 
+## Parallel curl
+
+The built-in `curl` tool fetches up to 20 HTTP/HTTPS URLs with up to 8 concurrent `curl` processes. Each response is labeled with its URL and HTTP status; bodies are capped at 8 KB each. It requires confirmation unless `--yolo` is active.
+
 ## Web search
 
 `web_search` is a built-in client tool backed by a sequential provider chain:

@@ -53,7 +53,7 @@ const BUILTIN_COMMANDS = [
   "mcp",
   "reload",
 ];
-const BUILTIN_TOOLS = ["read", "write", "edit", "bash", "grep", "find", "ls", "web_search", "task"];
+const BUILTIN_TOOLS = ["read", "write", "edit", "bash", "grep", "find", "ls", "curl", "web_search", "task"];
 
 function helpText(): string {
   return `cletus ${VERSION}

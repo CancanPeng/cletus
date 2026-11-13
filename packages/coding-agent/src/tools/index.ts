@@ -3,6 +3,7 @@ import type { Model } from "@cletus/ai";
 import type { WebSearchConfig } from "../config.js";
 import type { PermissionPolicy } from "../permissions/policy.js";
 import { createBashTool } from "./bash.js";
+import { createCurlTool } from "./curl.js";
 import { createEditTool } from "./edit.js";
 import { createFindTool } from "./find.js";
 import { createGrepTool } from "./grep.js";
@@ -36,6 +37,7 @@ export function createCoreTools(deps: CoreToolDeps): AgentTool[] {
     createGrepTool({ policy: deps.policy, cwd: deps.cwd }),
     createFindTool({ policy: deps.policy, cwd: deps.cwd }),
     createLsTool({ policy: deps.policy, cwd: deps.cwd }),
+    createCurlTool(),
     ...(deps.webSearch.enabled
       ? [createWebSearchTool({ config: deps.webSearch })]
       : []),

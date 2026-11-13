@@ -48,6 +48,24 @@ describe("permission policy", () => {
     expect((await policy.check("web_search", { query: "hello" })).allow).toBe(true);
   });
 
+  it("requires confirmation for parallel curl", async () => {
+    const cwd = await temp();
+    const policy = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: false,
+    });
+    expect(
+      (await policy.check("curl", { urls: ["https://example.com"] })).allow,
+    ).toBe(false);
+    policy.setYolo(true);
+    expect(
+      (await policy.check("curl", { urls: ["https://example.com"] })).allow,
+    ).toBe(true);
+  });
+
   it("toggles yolo mode at runtime", async () => {
     const cwd = await temp();
     const policy = new PermissionPolicy({

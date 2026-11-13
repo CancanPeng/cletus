@@ -26,6 +26,7 @@ export class PermissionPolicy {
   private readonly sessionCommands = new Set<string>();
   private readonly sessionMcpTools = new Set<string>();
   private readonly sessionSearches = new Set<string>();
+  private readonly sessionCurls = new Set<string>();
 
   constructor(opts: {
     cwd: string;
@@ -55,6 +56,7 @@ export class PermissionPolicy {
     this.sessionCommands.clear();
     this.sessionMcpTools.clear();
     this.sessionSearches.clear();
+    this.sessionCurls.clear();
   }
 
   setAllowWrite(patterns: string[]): void {
@@ -153,6 +155,25 @@ export class PermissionPolicy {
     }
 
     if (toolName === "task") return { allow: true };
+
+    if (toolName === "curl") {
+      if (this.yolo) return { allow: true };
+      const urls = Array.isArray(args["urls"])
+        ? args["urls"].map(String).join(" ")
+        : "";
+      if (this.sessionCurls.has(urls)) return { allow: true };
+      if (!this.interactive) {
+        return { allow: false, reason: "Non-interactive mode requires --yolo for curl" };
+      }
+      const decision = await this.ask(
+        toolName,
+        args,
+        `curl: ${urls}`,
+        urls,
+      );
+      if (decision.allow) this.sessionCurls.add(urls);
+      return decision;
+    }
 
     if (toolName === "web_search") {
       if (this.yolo) return { allow: true };
