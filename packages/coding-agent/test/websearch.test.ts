@@ -7,6 +7,8 @@ import {
 } from "../src/web/search/index.js";
 import { parseDuckDuckGoHtml } from "../src/web/search/providers/duckduckgo.js";
 import { createWebSearchTool } from "../src/tools/web-search.js";
+import { createCoreTools } from "../src/tools/index.js";
+import { PermissionPolicy } from "../src/permissions/policy.js";
 
 const config = { enabled: true, order: ["a", "b"], timeoutSeconds: 5 };
 
@@ -73,6 +75,41 @@ describe("web search", () => {
         constraints,
       ).map((source) => source.title),
     ).toEqual(["ok"]);
+  });
+
+  it("registers only one web_search surface", async () => {
+    const policy = new PermissionPolicy({
+      cwd: process.cwd(),
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: true,
+      interactive: false,
+    });
+    const base = {
+      provider: "openai" as const,
+      id: "fake",
+      baseUrl: "http://localhost",
+      contextWindow: 1000,
+      maxOutputTokens: 100,
+    };
+    const client = createCoreTools({
+      cwd: process.cwd(),
+      policy,
+      home: process.cwd(),
+      model: base,
+      sessionId: "1",
+      webSearch: config,
+    });
+    expect(client.some((tool) => tool.name === "web_search")).toBe(true);
+    const native = createCoreTools({
+      cwd: process.cwd(),
+      policy,
+      home: process.cwd(),
+      model: { ...base, webSearch: true },
+      sessionId: "1",
+      webSearch: config,
+    });
+    expect(native.some((tool) => tool.name === "web_search")).toBe(false);
   });
 
   it("returns a formatted tool result", async () => {

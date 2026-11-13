@@ -630,6 +630,7 @@ async function runTui(opts: {
         if (entry) entry.webSearch = enabled;
         await writeJsonAtomic(configPath(opts.home), opts.config);
         session.agent.setModel(session.model);
+        session.refreshTools();
         app?.notify(
           enabled
             ? "Native web search enabled for this model"
