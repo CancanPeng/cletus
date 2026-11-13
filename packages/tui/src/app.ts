@@ -37,6 +37,7 @@ export type TuiAppOptions = {
   header: string;
   theme: Theme;
   keybindings: KeybindingsManager;
+  showThinking?: boolean;
   submit: (text: string) => Promise<void>;
   followUp?: (text: string) => void;
   abort: () => void;
@@ -65,7 +66,12 @@ export type TranscriptBlock =
 
 type BlockView =
   | { kind: "user"; box: BoxRenderable; text: TextRenderable }
-  | { kind: "assistant"; box: BoxRenderable; markdown: MarkdownRenderable }
+  | {
+      kind: "assistant";
+      box: BoxRenderable;
+      thinking: TextRenderable;
+      markdown: MarkdownRenderable;
+    }
   | {
       kind: "tool";
       box: BoxRenderable;
@@ -101,6 +107,7 @@ function toolPreview(output: string, isError: boolean, arrow: string): string {
 export class TuiApp {
   private readonly options: TuiAppOptions;
   private readonly history: string[];
+  private showThinking: boolean;
   private renderer: CliRenderer | undefined;
   private ownsRenderer = true;
   private root: BoxRenderable | undefined;
@@ -168,6 +175,7 @@ export class TuiApp {
     this.theme = options.theme;
     this.header = options.header;
     this.history = options.history;
+    this.showThinking = options.showThinking ?? true;
   }
 
   async start(): Promise<void> {
@@ -506,6 +514,17 @@ export class TuiApp {
     this.updateFooter();
   }
 
+  setShowThinking(enabled: boolean): void {
+    this.showThinking = enabled;
+    for (const block of this.blocks.values()) {
+      if (block.kind !== "assistant") continue;
+      const view = this.views.get(block.id);
+      if (view?.kind === "assistant") {
+        view.thinking.visible = enabled && Boolean(block.thinking);
+      }
+    }
+  }
+
   setVerbose(enabled: boolean): void {
     this.verbose = enabled;
     for (const [id, block] of this.blocks) {
@@ -657,6 +676,13 @@ export class TuiApp {
       return { kind: "user", box, text };
     }
     if (block.kind === "assistant") {
+      const thinking = new TextRenderable(this.renderer!, {
+        content: block.thinking ?? "",
+        fg: this.color("muted"),
+        wrapMode: "word",
+        width: "100%",
+        visible: this.showThinking && Boolean(block.thinking),
+      });
       const markdown = new MarkdownRenderable(this.renderer!, {
         content: block.text,
         syntaxStyle: this.syntaxStyle!,
@@ -665,8 +691,9 @@ export class TuiApp {
         conceal: true,
         streaming: true,
       });
+      box.add(thinking);
       box.add(markdown);
-      return { kind: "assistant", box, markdown };
+      return { kind: "assistant", box, thinking, markdown };
     }
     if (block.kind === "tool") {
       const status = this.toolStatus(block);
@@ -732,6 +759,8 @@ export class TuiApp {
     if (view.kind === "user" && block.kind === "user") {
       view.text.content = `› ${block.text}`;
     } else if (view.kind === "assistant" && block.kind === "assistant") {
+      view.thinking.content = block.thinking ?? "";
+      view.thinking.visible = this.showThinking && Boolean(block.thinking);
       view.markdown.content = block.text;
     } else if (view.kind === "tool" && block.kind === "tool") {
       const status = this.toolStatus(block);

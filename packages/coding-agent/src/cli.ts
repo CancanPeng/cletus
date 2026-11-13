@@ -212,6 +212,15 @@ function eventText(message: AgentMessage): string {
   return "";
 }
 
+function eventThinking(message: AgentMessage): string {
+  if (message.role === "assistant") {
+    return message.content
+      .map((block) => (block.type === "thinking" ? block.thinking : ""))
+      .join("");
+  }
+  return "";
+}
+
 async function createSessionFor(opts: {
   cwd: string;
   home: string;
@@ -259,6 +268,7 @@ async function runTui(opts: {
   let unsubscribe: (() => void) | undefined;
   let assistantId: string | undefined;
   let assistantText = "";
+  let thinkingText = "";
   let blockCounter = 0;
   let conversationStart: number | undefined;
   let lastDuration: string | undefined;
@@ -295,22 +305,46 @@ async function runTui(opts: {
       });
       assistantId = `a${blockCounter++}`;
       assistantText = "";
-      app.appendBlock({ id: assistantId, kind: "assistant", text: "" });
+      thinkingText = "";
+      app.appendBlock({ id: assistantId, kind: "assistant", text: "", thinking: "" });
     } else if (event.type === "message_update" && event.delta.type === "text") {
       if (!assistantId) {
         assistantId = `a${blockCounter++}`;
-        app.appendBlock({ id: assistantId, kind: "assistant", text: "" });
+        app.appendBlock({ id: assistantId, kind: "assistant", text: "", thinking: "" });
       }
       assistantText += event.delta.text;
-      app.updateBlock(assistantId, { kind: "assistant", text: assistantText });
+      app.updateBlock(assistantId, {
+        kind: "assistant",
+        text: assistantText,
+        thinking: thinkingText,
+      });
+    } else if (event.type === "message_update" && event.delta.type === "thinking") {
+      if (!assistantId) {
+        assistantId = `a${blockCounter++}`;
+        app.appendBlock({ id: assistantId, kind: "assistant", text: "", thinking: "" });
+      }
+      thinkingText += event.delta.text;
+      app.updateBlock(assistantId, {
+        kind: "assistant",
+        text: assistantText,
+        thinking: thinkingText,
+      });
     } else if (event.type === "message_end" && event.message.role === "assistant") {
       const text = eventText(event.message);
-      if (text) {
-        assistantText = text;
+      const thinking = eventThinking(event.message);
+      if (text) assistantText = text;
+      if (thinking) thinkingText = thinking;
+      if (text || thinking) {
         if (!assistantId) {
           assistantId = `a${blockCounter++}`;
-          app.appendBlock({ id: assistantId, kind: "assistant", text });
-        } else app.updateBlock(assistantId, { kind: "assistant", text });
+          app.appendBlock({ id: assistantId, kind: "assistant", text, thinking });
+        } else {
+          app.updateBlock(assistantId, {
+            kind: "assistant",
+            text: assistantText,
+            thinking: thinkingText,
+          });
+        }
       }
       if (event.message.stopReason === "error") {
         app.notify(event.message.errorMessage ?? "Model error", "error");
@@ -705,6 +739,24 @@ async function runTui(opts: {
       },
     },
     {
+      name: "thinking",
+      description: "Toggle thinking output",
+      run: async (args) => {
+        const value = args.trim().toLowerCase();
+        if (value && !["on", "off", "true", "false", "1", "0", "yes", "no"].includes(value)) {
+          app?.notify("Usage: /thinking [on|off]", "warn");
+          return;
+        }
+        const enabled = value
+          ? ["on", "true", "1", "yes"].includes(value)
+          : !opts.config.tui.showThinking;
+        opts.config.tui.showThinking = enabled;
+        app?.setShowThinking(enabled);
+        await writeJsonAtomic(configPath(opts.home), opts.config);
+        app?.notify(enabled ? "Thinking output: on" : "Thinking output: off");
+      },
+    },
+    {
       name: "verbose",
       description: "Show full tool output",
       run: (args) => {
@@ -870,6 +922,7 @@ async function runTui(opts: {
     header: "cletus",
     theme: currentTheme,
     keybindings,
+    showThinking: opts.config.tui.showThinking,
     submit: async (text) => {
       if (!session) return;
       await refreshHeader();

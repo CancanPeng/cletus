@@ -330,6 +330,26 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("shows and hides thinking content", async () => {
+    const ctx = await setupApp();
+    ctx.app.appendBlock({
+      id: "thinking-1",
+      kind: "assistant",
+      text: "Answer",
+      thinking: "Reasoning about the answer",
+    });
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("Reasoning about the answer");
+    ctx.app.setShowThinking(false);
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).not.toContain("Reasoning about the answer");
+    ctx.app.setShowThinking(true);
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("Reasoning about the answer");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("renders assistant markdown and tool cards", async () => {
     const ctx = await setupApp();
     ctx.app.appendBlock({
