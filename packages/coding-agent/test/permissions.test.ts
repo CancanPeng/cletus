@@ -34,6 +34,23 @@ describe("permission policy", () => {
     await expect(policy.resolveRead("link.txt")).rejects.toThrow("outside allowed roots");
   });
 
+  it("toggles yolo mode at runtime", async () => {
+    const cwd = await temp();
+    const policy = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: false,
+    });
+    expect((await policy.check("write", { path: "a.txt", content: "x" })).allow).toBe(false);
+    policy.setYolo(true);
+    expect(policy.yolo).toBe(true);
+    expect((await policy.check("write", { path: "a.txt", content: "x" })).allow).toBe(true);
+    policy.setYolo(false);
+    expect((await policy.check("write", { path: "a.txt", content: "x" })).allow).toBe(false);
+  });
+
   it("updates the persistent write allowlist at runtime", async () => {
     const cwd = await temp();
     const policy = new PermissionPolicy({

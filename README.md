@@ -52,6 +52,8 @@ cletus permissions reset
 
 In the TUI use `/permissions list`, `/permissions add src/**`, `/permissions remove src/**`, `/permissions reset`. Matching writes skip confirmation, but still stay inside the cwd and can never modify `.git`.
 
+`/yolo` toggles YOLO mode for the current session; `/yolo on` and `/yolo off` set it explicitly. The status bar shows `YOLO` while it is active. `/new` and `/resume` restore the startup mode (`--yolo` or off).
+
 ## Keys
 
 | Key | Action |
@@ -77,7 +79,7 @@ Keybinding changes apply on the next launch. `/theme` switches and persists imme
 
 Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a command. `Enter` on a complete command such as `/quit` runs it immediately.
 
-`/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/keys`, `/skills`, `/permissions`, `/mcp`, `/reload`, `/skill:<name>`, plus prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
+`/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/keys`, `/skills`, `/permissions`, `/yolo`, `/mcp`, `/reload`, `/skill:<name>`, plus prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
 
 ## Skills
 

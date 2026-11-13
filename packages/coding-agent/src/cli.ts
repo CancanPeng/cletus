@@ -46,6 +46,7 @@ const BUILTIN_COMMANDS = [
   "keys",
   "skills",
   "permissions",
+  "yolo",
   "mcp",
   "reload",
 ];
@@ -352,6 +353,8 @@ async function runTui(opts: {
 
   const attach = async (manager: SessionManager): Promise<void> => {
     policy.resetSession();
+    policy.setYolo(opts.yolo);
+    app?.setYolo(opts.yolo);
     if (session) {
       unsubscribe?.();
       await session.dispose();
@@ -580,6 +583,28 @@ async function runTui(opts: {
       },
     },
     {
+      name: "yolo",
+      description: "Toggle YOLO mode for this session",
+      run: (args) => {
+        const value = args.trim().toLowerCase();
+        if (value && !["on", "off", "true", "false", "1", "0", "yes", "no"].includes(value)) {
+          app?.notify("Usage: /yolo [on|off]", "warn");
+          return;
+        }
+        const enabled = value
+          ? ["on", "true", "1", "yes"].includes(value)
+          : !policy.yolo;
+        policy.setYolo(enabled);
+        app?.setYolo(enabled);
+        app?.notify(
+          enabled
+            ? "YOLO enabled: write and command confirmations are bypassed"
+            : "YOLO disabled: confirmations restored",
+          enabled ? "warn" : "info",
+        );
+      },
+    },
+    {
       name: "mcp",
       description: "Show MCP server status",
       run: () => {
@@ -682,6 +707,7 @@ async function runTui(opts: {
 
   await attach(opts.manager);
   await app.start();
+  app.setYolo(opts.yolo);
   if (session) {
     app.setStatus({
       busy: false,

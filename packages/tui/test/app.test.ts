@@ -169,6 +169,18 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("marks yolo mode in the status line", async () => {
+    const ctx = await setupApp();
+    ctx.app.setYolo(true);
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("YOLO");
+    ctx.app.setYolo(false);
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).not.toContain("YOLO");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("shows the slash command palette", async () => {
     const ctx = await setupApp();
     ctx.mockInput.typeText("/");

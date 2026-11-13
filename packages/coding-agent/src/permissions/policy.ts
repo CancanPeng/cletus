@@ -19,7 +19,7 @@ const READ_TOOLS: Record<string, true> = {
 export class PermissionPolicy {
   private readonly sandbox: SandboxOptions;
   private allowWrite: string[];
-  readonly yolo: boolean;
+  private yoloMode: boolean;
   private readonly interactive: boolean;
   private readonly confirm: ConfirmFn | undefined;
   private readonly sessionPaths = new Set<string>();
@@ -36,7 +36,7 @@ export class PermissionPolicy {
   }) {
     this.sandbox = { cwd: opts.cwd, readOnlyRoots: opts.readOnlyRoots };
     this.allowWrite = [...opts.allowWrite];
-    this.yolo = opts.yolo;
+    this.yoloMode = opts.yolo;
     this.interactive = opts.interactive;
     this.confirm = opts.confirm;
   }
@@ -57,6 +57,14 @@ export class PermissionPolicy {
 
   setAllowWrite(patterns: string[]): void {
     this.allowWrite = [...patterns];
+  }
+
+  get yolo(): boolean {
+    return this.yoloMode;
+  }
+
+  setYolo(enabled: boolean): void {
+    this.yoloMode = enabled;
   }
 
   resolveWrite(input: string): Promise<string> {

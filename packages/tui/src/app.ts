@@ -114,6 +114,7 @@ export class TuiApp {
   private selectState: SelectState | undefined;
   private historyIndex = 0;
   private expandedAll = false;
+  private yolo = false;
   private started = false;
   private stopped = false;
 
@@ -353,6 +354,11 @@ export class TuiApp {
 
   getKeybindings(): KeybindingsManager {
     return this.options.keybindings;
+  }
+
+  setYolo(enabled: boolean): void {
+    this.yolo = enabled;
+    this.updateFooter();
   }
 
   notify(text: string, level: "info" | "warn" | "error" = "info"): void {
@@ -831,10 +837,11 @@ export class TuiApp {
       const suffix = [
         usage,
         this.status.queue > 0 ? `${this.status.queue} queued` : "",
+        this.yolo ? "YOLO" : "",
       ].filter(Boolean).join(" · ");
       return `${SPINNER[this.spinner] ?? "⠋"} ${activity}${suffix ? ` · ${suffix}` : ""}`;
     }
-    return `● ready${usage ? ` · ${usage}` : ""}`;
+    return `● ready${usage ? ` · ${usage}` : ""}${this.yolo ? " · YOLO" : ""}`;
   }
 
   private footerRightContent(): string {
@@ -854,11 +861,12 @@ export class TuiApp {
     if (!this.footerLeft || !this.footerRight) return;
     this.footerLeft.content = this.footerLeftContent();
     this.footerRight.content = this.footerRightContent();
-    this.footerLeft.fg = this.modal
-      ? this.color("warning")
-      : this.status.busy
-        ? this.color("accent")
-        : this.color("success");
+    this.footerLeft.fg =
+      this.modal || this.yolo
+        ? this.color("warning")
+        : this.status.busy
+          ? this.color("accent")
+          : this.color("success");
     this.footerRight.fg = this.color("muted");
   }
 
