@@ -18,7 +18,14 @@ const server = http.createServer((req, res) => {
     body += chunk;
   });
   req.on("end", async () => {
-    const parsed = JSON.parse(body || "{}");
+    let parsed;
+    try {
+      parsed = JSON.parse(body || "{}");
+    } catch {
+      res.statusCode = 400;
+      res.end("invalid json");
+      return;
+    }
     const messages = Array.isArray(parsed.messages) ? parsed.messages : [];
     const lastUser = [...messages].reverse().find((message) => message.role === "user");
     const text = String(lastUser?.content ?? "");
@@ -35,7 +42,41 @@ const server = http.createServer((req, res) => {
       await wait();
     };
 
-    if (/create hello\.txt/i.test(text)) {
+    if (/run pwd/i.test(text)) {
+      if (!hasToolResult) {
+        await write({
+          choices: [
+            {
+              index: 0,
+              delta: {
+                role: "assistant",
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_bash_1",
+                    type: "function",
+                    function: { name: "bash", arguments: '{"command":"pwd"}' },
+                  },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+        });
+        await write({
+          choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        });
+      } else {
+        await write({
+          choices: [{ index: 0, delta: { role: "assistant", content: "pwd done" }, finish_reason: null }],
+        });
+        await write({
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          usage: { prompt_tokens: 15, completion_tokens: 3, total_tokens: 18 },
+        });
+      }
+    } else if (/create hello\.txt/i.test(text)) {
       if (!hasToolResult) {
         await write({
           choices: [
@@ -112,6 +153,10 @@ const server = http.createServer((req, res) => {
   });
 });
 
+server.on("error", (error) => {
+  process.stderr.write(`fake-openai server error: ${error.message}\n`);
+  process.exit(1);
+});
 server.listen(port, "127.0.0.1", () => {
   const address = server.address();
   const actual = typeof address === "object" && address ? address.port : port;

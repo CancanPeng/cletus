@@ -7,18 +7,14 @@
   "bin": {
     "cletus": "./dist/cli.js"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
+  "scripts": {
+    "prepack": "pnpm --dir ../.. build"
   },
   "files": [
-    "dist/**/*.js",
-    "dist/**/*.js.map",
-    "dist/**/*.d.ts"
+    "dist/cli.js",
+    "dist/cli.js.map",
+    "dist/index.js",
+    "dist/index.js.map"
   ],
   "engines": {
     "node": ">=26.4.0"

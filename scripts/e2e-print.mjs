@@ -82,8 +82,6 @@ child.stdout.on("data", (chunk) => {
 child.stderr.on("data", (chunk) => {
   stderr += chunk.toString();
 });
-const code = await new Promise((resolveCode) => child.on("exit", resolveCode));
-
 let failed = false;
 const check = (condition, message) => {
   if (!condition) {
@@ -91,37 +89,51 @@ const check = (condition, message) => {
     process.stderr.write(`FAIL: ${message}\n`);
   }
 };
-check(code === 0, `exit code ${code}; stderr: ${stderr}`);
-check(stdout.includes("Created hello.txt"), `stdout missing final text: ${stdout}`);
-const content = await readFile(join(cwd, "hello.txt"), "utf8").catch(() => "");
-check(content === "hi\n", `hello.txt content ${JSON.stringify(content)}`);
 
-const sessionsRoot = join(home, "sessions");
-const dirs = await readdir(sessionsRoot).catch(() => []);
-check(dirs.length > 0, "no session directory");
-if (dirs[0]) {
-  const files = await readdir(join(sessionsRoot, dirs[0]));
-  const file = files.find((name) => name.endsWith(".jsonl"));
-  check(Boolean(file), "no session file");
-  if (file) {
-    const lines = (await readFile(join(sessionsRoot, dirs[0], file), "utf8"))
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line));
-    const types = lines.map((line) => line.type);
-    check(types.includes("session"), "session header missing");
-    check(types.includes("message"), "messages missing");
-    const messages = lines.filter((line) => line.type === "message").map((line) => line.message);
-    check(messages.some((message) => message.role === "user"), "user message missing");
-    check(
-      messages.some((message) => message.role === "assistant" && message.content.some((block) => block.type === "toolCall")),
-      "assistant tool call missing",
-    );
-    check(messages.some((message) => message.role === "toolResult"), "tool result missing");
+try {
+  const watchdog = setTimeout(() => {
+    process.stderr.write("FAIL: e2e timed out after 60s\n");
+    child.kill("SIGKILL");
+  }, 60_000);
+  const code = await new Promise((resolveCode) => child.on("exit", resolveCode));
+  clearTimeout(watchdog);
+
+  check(code === 0, `exit code ${code}; stderr: ${stderr}`);
+  check(stdout.includes("Created hello.txt"), `stdout missing final text: ${stdout}`);
+  const content = await readFile(join(cwd, "hello.txt"), "utf8").catch(() => "");
+  check(content === "hi\n", `hello.txt content ${JSON.stringify(content)}`);
+
+  const sessionsRoot = join(home, "sessions");
+  const dirs = await readdir(sessionsRoot).catch(() => []);
+  check(dirs.length > 0, "no session directory");
+  if (dirs[0]) {
+    const files = await readdir(join(sessionsRoot, dirs[0]));
+    const file = files.find((name) => name.endsWith(".jsonl"));
+    check(Boolean(file), "no session file");
+    if (file) {
+      const lines = (await readFile(join(sessionsRoot, dirs[0], file), "utf8"))
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      const types = lines.map((line) => line.type);
+      check(types.includes("session"), "session header missing");
+      check(types.includes("message"), "messages missing");
+      const messages = lines.filter((line) => line.type === "message").map((line) => line.message);
+      check(messages.some((message) => message.role === "user"), "user message missing");
+      check(
+        messages.some((message) => message.role === "assistant" && message.content.some((block) => block.type === "toolCall")),
+        "assistant tool call missing",
+      );
+      check(messages.some((message) => message.role === "toolResult"), "tool result missing");
+    }
   }
+} catch (error) {
+  failed = true;
+  process.stderr.write(`FAIL: ${error instanceof Error ? error.message : String(error)}\n`);
+} finally {
+  server.kill("SIGKILL");
+  child.kill("SIGKILL");
+  await rm(temp, { recursive: true, force: true });
 }
-
-server.kill("SIGKILL");
-await rm(temp, { recursive: true, force: true });
 if (failed) process.exitCode = 1;
 else process.stdout.write("e2e-print passed\n");

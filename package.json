@@ -8,13 +8,13 @@
   },
   "scripts": {
     "build": "tsc -b && node scripts/bundle.mjs",
-    "typecheck": "tsc -b --pretty false",
+    "typecheck": "tsc -b --pretty false && tsc -p tsconfig.test.json --pretty false",
     "test": "NODE_OPTIONS=--experimental-ffi vitest run",
-    "dev": "pnpm build && node --experimental-ffi packages/coding-agent/dist/cli.js",
-    "prepublishOnly": "pnpm build"
+    "test:e2e": "node scripts/e2e-print.mjs",
+    "dev": "pnpm build && node --experimental-ffi packages/coding-agent/dist/cli.js"
   },
   "devDependencies": {
-    "@types/node": "^24.7.0",
+    "@types/node": "^26.6.6",
     "esbuild": "^0.28.2",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
