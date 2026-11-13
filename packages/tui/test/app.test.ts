@@ -280,6 +280,33 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("shows a live spinner and elapsed time for running tools", async () => {
+    const ctx = await setupApp();
+    ctx.app.appendBlock({
+      id: "tool-running",
+      kind: "tool",
+      name: "bash",
+      argsSummary: "sleep 2",
+      output: "",
+      isError: false,
+      expanded: false,
+      status: "running",
+      startedAt: Date.now() - 1200,
+    });
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("1.2s");
+    ctx.app.updateBlock("tool-running", {
+      kind: "tool",
+      status: "success",
+      output: "done",
+      duration: "1.3s",
+    });
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("1.3s");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("previews collapsed tool output and expands on toggle", async () => {
     const ctx = await setupApp();
     ctx.app.appendBlock({

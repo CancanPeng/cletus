@@ -368,6 +368,7 @@ async function runTui(opts: {
         isError: false,
         expanded: false,
         status: "running",
+        startedAt: Date.now(),
       });
     } else if (event.type === "tool_execution_update") {
       const text = event.partial.content.map((block) => block.text).join("");
@@ -837,6 +838,7 @@ async function runTui(opts: {
         queue: session.agent.queuedMessageCount,
         activity: `loading ${name}`,
         context: contextLabel(session),
+        startedAt: conversationStart,
       });
       try {
         const content = await readFile(current.path, "utf8");
@@ -939,6 +941,7 @@ async function runTui(opts: {
         queue: session.agent.queuedMessageCount,
         activity: "thinking",
         context: contextLabel(session),
+        startedAt: conversationStart,
       });
       try {
         await session.prompt(text);

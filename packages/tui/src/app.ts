@@ -61,6 +61,7 @@ export type TranscriptBlock =
       expanded: boolean;
       status?: "running" | "success" | "error";
       duration?: string;
+      startedAt?: number;
     }
   | { id: string; kind: "notice"; text: string; level: "info" | "warn" | "error" };
 
@@ -95,7 +96,14 @@ type ModalState = {
   resolve: (value: "allow" | "session" | "deny") => void;
 };
 
-const SPINNER = ["⠋", "⠙", "⠹", "⠸"];
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = Math.round(ms / 100) / 10;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  return `${minutes}m ${rest}s`;
+}
 
 function toolPreview(output: string, isError: boolean, arrow: string): string {
   const line = output.split("\n").map((item) => item.trim()).find((item) => item.length > 0);
@@ -156,9 +164,12 @@ export class TuiApp {
     activity?: string;
     context?: string;
     duration?: string;
+    startedAt?: number | undefined;
   } = { busy: false, model: "", tokens: "", queue: 0 };
   private spinner = 0;
   private spinnerTimer: NodeJS.Timeout | undefined;
+  private toolSpinner = 0;
+  private toolTicker: NodeJS.Timeout | undefined;
   private readonly blocks = new Map<string, TranscriptBlock>();
   private readonly order: string[] = [];
   private readonly views = new Map<string, BlockView>();
@@ -308,6 +319,8 @@ export class TuiApp {
     this.hideCompletion();
     clearInterval(this.spinnerTimer);
     this.spinnerTimer = undefined;
+    clearInterval(this.toolTicker);
+    this.toolTicker = undefined;
     this.modal?.resolve("deny");
     this.modal = undefined;
     this.manager?.resolve();
@@ -322,12 +335,18 @@ export class TuiApp {
   }
 
   appendBlock(block: TranscriptBlock): void {
-    const stored =
-      block.kind === "tool" && this.verbose ? { ...block, expanded: true } : block;
+    let stored = block;
+    if (stored.kind === "tool") {
+      if (this.verbose) stored = { ...stored, expanded: true };
+      if (stored.status === "running" && stored.startedAt === undefined) {
+        stored = { ...stored, startedAt: Date.now() };
+      }
+    }
     this.blocks.set(stored.id, stored);
     this.order.push(stored.id);
     const follow = stored.kind === "user" || this.isAtBottom();
     this.addView(stored, follow);
+    this.updateToolTickerState();
   }
 
   updateBlock(id: string, patch: Partial<TranscriptBlock>): void {
@@ -337,6 +356,7 @@ export class TuiApp {
     if (next.kind === "tool" && this.verbose) next.expanded = true;
     this.blocks.set(id, next);
     this.updateView(next);
+    this.updateToolTickerState();
   }
 
   setStatus(status: {
@@ -347,11 +367,17 @@ export class TuiApp {
     activity?: string;
     context?: string;
     duration?: string;
+    startedAt?: number | undefined;
   }): void {
-    this.status = status;
+    this.status = {
+      ...status,
+      startedAt: status.busy
+        ? status.startedAt ?? this.status.startedAt
+        : undefined,
+    };
     if (status.busy && !this.spinnerTimer) {
       this.spinnerTimer = setInterval(() => {
-        this.spinner = (this.spinner + 1) % SPINNER.length;
+        this.spinner = (this.spinner + 1) % this.theme.spinner.length;
         this.updateFooter();
       }, 200);
     } else if (!status.busy) {
@@ -656,11 +682,38 @@ export class TuiApp {
         ? this.symbol("toolError")
         : status === "success"
           ? this.symbol("toolSuccess")
-          : this.symbol("toolRunning");
+          : this.theme.spinner[this.toolSpinner % this.theme.spinner.length] ??
+            this.symbol("toolRunning");
     const chevron = block.expanded
       ? this.symbol("toolExpanded")
       : this.symbol("toolCollapsed");
-    return `${chevron} ${icon} ${block.name}${block.duration ? ` · ${block.duration}` : ""}`;
+    const elapsed =
+      status === "running" && block.startedAt !== undefined
+        ? formatElapsed(Date.now() - block.startedAt)
+        : block.duration;
+    return `${chevron} ${icon} ${block.name}${elapsed ? ` · ${elapsed}` : ""}`;
+  }
+
+  private updateToolTickerState(): void {
+    const running = [...this.blocks.values()].some(
+      (block) => block.kind === "tool" && this.toolStatus(block) === "running",
+    );
+    if (!running) {
+      clearInterval(this.toolTicker);
+      this.toolTicker = undefined;
+      return;
+    }
+    if (this.toolTicker) return;
+    this.toolTicker = setInterval(() => {
+      this.toolSpinner = (this.toolSpinner + 1) % this.theme.spinner.length;
+      for (const [id, block] of this.blocks) {
+        if (block.kind !== "tool" || this.toolStatus(block) !== "running") continue;
+        const view = this.views.get(id);
+        if (view?.kind === "tool") {
+          view.title.content = this.toolTitle(block);
+        }
+      }
+    }, 100);
   }
 
   private createView(block: TranscriptBlock): BlockView {
@@ -1100,12 +1153,16 @@ export class TuiApp {
     if (this.selectState) return "select an item";
     if (this.status.busy) {
       const activity = this.status.activity ?? "working";
+      const elapsed = this.status.startedAt
+        ? `${this.symbol("duration")} ${formatElapsed(Date.now() - this.status.startedAt)}`
+        : "";
       const suffix = [
         usage,
+        elapsed,
         this.status.queue > 0 ? `${this.symbol("queue")} ${this.status.queue} queued` : "",
         this.yolo ? `${this.symbol("yolo")} YOLO` : "",
       ].filter(Boolean).join(" · ");
-      return `${SPINNER[this.spinner] ?? "⠋"} ${activity}${suffix ? ` · ${suffix}` : ""}`;
+      return `${this.theme.spinner[this.spinner % this.theme.spinner.length] ?? "⠋"} ${activity}${suffix ? ` · ${suffix}` : ""}`;
     }
     return `${this.symbol("ready")}${usage ? ` · ${usage}` : ""}${this.status.duration ? ` · ${this.symbol("duration")} ${this.status.duration}` : ""}${this.verbose ? " · verbose" : ""}${this.yolo ? ` · ${this.symbol("yolo")} YOLO` : ""}`;
   }

@@ -47,6 +47,7 @@ export type Theme = {
   colors: Record<ThemeToken, string>;
   symbols: Record<SymbolKey, string>;
   symbol: (key: SymbolKey) => string;
+  spinner: string[];
 };
 
 const SYMBOLS: Record<SymbolPreset, Record<SymbolKey, string>> = {
@@ -115,7 +116,13 @@ const SYMBOLS: Record<SymbolPreset, Record<SymbolKey, string>> = {
   },
 };
 
-const THEMES: Record<Theme["name"], Omit<Theme, "name" | "symbols" | "symbol">> = {
+const SPINNERS: Record<SymbolPreset, string[]> = {
+  unicode: ["⠋", "⠙", "⠹", "⠸"],
+  nerd: ["⠋", "⠙", "⠹", "⠸"],
+  ascii: ["|", "/", "-", "\\"],
+};
+
+const THEMES: Record<Theme["name"], Omit<Theme, "name" | "symbols" | "symbol" | "spinner">> = {
   dark: {
     background: "#16161e",
     colors: {
@@ -216,5 +223,6 @@ export function getTheme(name: string, symbols?: SymbolConfig): Theme {
     ...THEMES[key],
     symbols: resolved,
     symbol: (symbolKey) => resolved[symbolKey],
+    spinner: SPINNERS[preset],
   };
 }
