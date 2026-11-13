@@ -5,6 +5,7 @@ import type {
   Model,
   StreamOptions,
 } from "./types.js";
+import { emptyUsage } from "./types.js";
 
 export type StreamFn = (
   model: Model,
@@ -19,21 +20,21 @@ export class AssistantEventStream implements AsyncIterable<AssistantStreamEvent>
   private readonly waiters: Waiter[] = [];
   private closed = false;
   private finalMessage: AssistantMessage | undefined;
+  private partialMessage: AssistantMessage | undefined;
   private readonly resultPromise: Promise<AssistantMessage>;
   private resolveResult!: (message: AssistantMessage) => void;
-  private rejectResult!: (error: unknown) => void;
 
   constructor() {
-    const { promise, resolve, reject } = Promise.withResolvers<AssistantMessage>();
+    const { promise, resolve } = Promise.withResolvers<AssistantMessage>();
     this.resultPromise = promise;
     this.resolveResult = resolve;
-    this.rejectResult = reject;
     // Consumers may only await result(); avoid unhandled rejection noise.
     this.resultPromise.catch(() => undefined);
   }
 
   push(event: AssistantStreamEvent): void {
     if (this.closed) return;
+    if (event.type === "start") this.partialMessage = event.partial;
     const waiter = this.waiters.shift();
     if (waiter) waiter({ value: event, done: false });
     else this.queue.push(event);
@@ -76,7 +77,22 @@ export class AssistantEventStream implements AsyncIterable<AssistantStreamEvent>
       },
       return: () => {
         this.closed = true;
-        if (this.finalMessage) this.resolveResult(this.finalMessage);
+        for (const waiter of this.waiters.splice(0)) {
+          waiter({ value: undefined, done: true });
+        }
+        // Early consumer exit must still settle result() waiters.
+        const aborted: AssistantMessage = {
+          ...(this.partialMessage ?? {
+            role: "assistant",
+            content: [],
+            provider: "",
+            model: "",
+            usage: emptyUsage(),
+            timestamp: Date.now(),
+          }),
+          stopReason: "aborted",
+        };
+        this.resolveResult(this.finalMessage ?? aborted);
         return Promise.resolve({ value: undefined, done: true });
       },
     };

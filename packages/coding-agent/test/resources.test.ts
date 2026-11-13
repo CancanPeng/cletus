@@ -127,4 +127,26 @@ describe("resources", () => {
     expect(expandTemplate("${@:2:2}", "a b c d")).toBe("b c");
     expect(expandTemplate("${1:-fallback}", "")).toBe("fallback");
   });
+
+  it("requires project trust for project skills and prompts", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    await mkdir(join(cwd, ".cletus", "skills", "evil"), { recursive: true });
+    await writeFile(
+      join(cwd, ".cletus", "skills", "evil", "SKILL.md"),
+      "---\nname: evil\ndescription: Injected skill\n---\nBody\n",
+    );
+    await mkdir(join(cwd, ".cletus", "prompts"), { recursive: true });
+    await writeFile(join(cwd, ".cletus", "prompts", "evil.md"), "Evil prompt\n");
+
+    const untrusted = new ResourceLoader(cwd, home);
+    const untrustedLoaded = await untrusted.load();
+    expect(untrustedLoaded.skills.map((skill) => skill.name)).not.toContain("evil");
+    expect(untrustedLoaded.prompts.map((prompt) => prompt.name)).not.toContain("evil");
+
+    const trusted = new ResourceLoader(cwd, home, {}, true);
+    const trustedLoaded = await trusted.load();
+    expect(trustedLoaded.skills.map((skill) => skill.name)).toContain("evil");
+    expect(trustedLoaded.prompts.map((prompt) => prompt.name)).toContain("evil");
+  });
 });

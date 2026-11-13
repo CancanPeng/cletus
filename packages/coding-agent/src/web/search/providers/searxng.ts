@@ -18,7 +18,7 @@ export const searxngProvider: SearchProvider = {
       q: params.query,
     });
     if (params.recency) {
-      query.set("time_range", params.recency === "week" ? "month" : params.recency);
+      query.set("time_range", params.recency);
     }
     const response = await fetch(`${base.replace(/\/$/, "")}/search?${query}`, {
       headers: { accept: "application/json" },

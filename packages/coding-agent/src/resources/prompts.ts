@@ -10,28 +10,27 @@ export type PromptTemplate = {
 };
 
 function parseFrontmatter(text: string): { meta: Record<string, unknown>; body: string } {
-  if (!text.startsWith("---\n") && !text.startsWith("---\r\n")) {
-    return { meta: {}, body: text };
-  }
-  const end = text.indexOf("\n---", 3);
-  if (end < 0) return { meta: {}, body: text };
-  const headerEnd = text.indexOf("\n", end + 1);
-  const raw = text.slice(3, end).trim();
+  const source = text.startsWith("\ufeff") ? text.slice(1) : text;
+  // The closing delimiter must be a full line, not a prefix of ---- or ---foo.
+  const match = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(source);
+  if (!match) return { meta: {}, body: source };
   let meta: Record<string, unknown> = {};
   try {
-    const parsed = parseYaml(raw);
+    const parsed = parseYaml(match[1] ?? "");
     if (parsed && typeof parsed === "object") meta = parsed as Record<string, unknown>;
   } catch {
     meta = {};
   }
-  return { meta, body: headerEnd >= 0 ? text.slice(headerEnd + 1) : "" };
+  return { meta, body: source.slice(match[0].length) };
 }
 
 export async function loadPrompts(
   cwd: string,
   home: string,
+  trustProject = false,
 ): Promise<PromptTemplate[]> {
-  const dirs = [join(home, "prompts"), join(cwd, ".cletus", "prompts")];
+  const dirs = [join(home, "prompts")];
+  if (trustProject) dirs.push(join(cwd, ".cletus", "prompts"));
   const prompts: PromptTemplate[] = [];
   const names = new Set<string>();
   for (const dir of dirs) {

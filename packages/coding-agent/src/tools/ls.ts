@@ -29,8 +29,13 @@ export function createLsTool(deps: {
         if (entry.isDirectory()) {
           rows.push({ name: entry.name, directory: true, size: 0 });
         } else {
-          const info = await stat(`${path}/${entry.name}`);
-          rows.push({ name: entry.name, directory: false, size: info.size });
+          try {
+            const info = await stat(`${path}/${entry.name}`);
+            rows.push({ name: entry.name, directory: false, size: info.size });
+          } catch {
+            // Broken symlink or vanished entry: list it without a size.
+            rows.push({ name: entry.name, directory: false, size: 0 });
+          }
         }
       }
       rows.sort((a, b) => {

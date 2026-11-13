@@ -100,11 +100,17 @@ export class McpManager {
       );
       try {
         await Promise.race([client.connect(transport), timeoutState.promise]);
+      } catch (error) {
+        // A timed-out connect may already have spawned the server process.
+        await client.close().catch(() => undefined);
+        throw error;
       } finally {
         clearTimeout(timer);
       }
-      const listed = await client.listTools();
+      // Track the client before listTools so a failure still closes the
+      // spawned server process in the catch below.
       state.client = client;
+      const listed = await client.listTools();
       state.connected = true;
       state.toolCount = listed.tools.length;
       const used = new Set<string>();
@@ -122,8 +128,12 @@ export class McpManager {
           snippet: tool.description?.split("\n")[0]?.slice(0, 120) ?? `MCP tool ${tool.name}`,
           description: tool.description ?? `MCP tool ${tool.name} from ${state.name}`,
           parameters: schema,
-          execute: async (params): Promise<ToolResult> => {
-            const result = await client.callTool({ name: tool.name, arguments: params });
+          execute: async (params, ctx): Promise<ToolResult> => {
+            const result = await client.callTool(
+              { name: tool.name, arguments: params },
+              undefined,
+              { signal: ctx.signal, timeout },
+            );
             const { text, isError } = textContent(result);
             return {
               isError,

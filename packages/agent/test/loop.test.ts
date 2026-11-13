@@ -3,7 +3,6 @@ import {
   AssistantEventStream,
   assistantMessage,
   type AssistantMessage,
-  type AssistantStreamEvent,
   type LlmContext,
   type Model,
   type StreamFn,
@@ -114,6 +113,172 @@ describe("runAgentLoop", () => {
     if (end?.type === "agent_end") {
       expect(end.messages.some((message) => message.role === "toolResult")).toBe(true);
       expect(end.messages.some((message) => message.role === "user")).toBe(true);
+    }
+  });
+
+  it("reports the configured cwd to tool execution", async () => {
+    let call = 0;
+    const streamFn: StreamFn = (): AssistantEventStream => {
+      call += 1;
+      if (call === 1) {
+        return fakeStream(
+          assistantMessage(
+            model,
+            [{ type: "toolCall", id: "call_1", name: "probe", arguments: {} }],
+            "toolUse",
+          ),
+        );
+      }
+      return fakeStream(final("done"));
+    };
+    let seenCwd = "";
+    const tool: AgentTool = {
+      name: "probe",
+      description: "probe",
+      parameters: { type: "object", properties: {} },
+      execute: async (_params, ctx) => {
+        seenCwd = ctx.cwd;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    };
+    await runAgentLoop(
+      ["go"],
+      { systemPrompt: "s", messages: [], tools: [tool] },
+      {
+        model,
+        streamFn,
+        tools: [tool],
+        cwd: "/tmp/cletus-cwd-test",
+        convertToLlm: (messages) =>
+          messages.filter((message) => message.role !== "custom") as never,
+      },
+      async () => {},
+      new AbortController().signal,
+    );
+    expect(seenCwd).toBe("/tmp/cletus-cwd-test");
+  });
+
+  it("answers every tool call when a batch is aborted mid-flight", async () => {
+    const controller = new AbortController();
+    const events: AgentEvent[] = [];
+    let call = 0;
+    const streamFn: StreamFn = (): AssistantEventStream => {
+      call += 1;
+      if (call === 1) {
+        return fakeStream(
+          assistantMessage(
+            model,
+            [
+              { type: "toolCall", id: "call_1", name: "slow", arguments: {} },
+              { type: "toolCall", id: "call_2", name: "slow", arguments: {} },
+            ],
+            "toolUse",
+          ),
+        );
+      }
+      return fakeStream(final("done"));
+    };
+    const tool: AgentTool = {
+      name: "slow",
+      description: "slow",
+      parameters: { type: "object", properties: {} },
+      execute: async () => {
+        controller.abort();
+        return { content: [{ type: "text", text: "ran" }] };
+      },
+    };
+    await runAgentLoop(
+      ["go"],
+      { systemPrompt: "s", messages: [], tools: [tool] },
+      {
+        model,
+        streamFn,
+        tools: [tool],
+        convertToLlm: (messages) =>
+          messages.filter((message) => message.role !== "custom") as never,
+      },
+      async (event) => {
+        events.push(event);
+      },
+      controller.signal,
+    );
+    const end = events.find((event) => event.type === "agent_end");
+    expect(end?.type).toBe("agent_end");
+    if (end?.type !== "agent_end") return;
+    const results = end.messages.filter((message) => message.role === "toolResult");
+    expect(results.map((message) => message.toolCallId).sort()).toEqual(["call_1", "call_2"]);
+    expect(call).toBe(1);
+  });
+
+  it("stops the loop when a tool result requests termination", async () => {
+    const events: AgentEvent[] = [];
+    let call = 0;
+    const streamFn: StreamFn = (): AssistantEventStream => {
+      call += 1;
+      return fakeStream(
+        assistantMessage(
+          model,
+          [{ type: "toolCall", id: `call_${call}`, name: "stopper", arguments: {} }],
+          "toolUse",
+        ),
+      );
+    };
+    const tool: AgentTool = {
+      name: "stopper",
+      description: "stopper",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ content: [{ type: "text", text: "bye" }], terminate: true }),
+    };
+    await runAgentLoop(
+      ["go"],
+      { systemPrompt: "s", messages: [], tools: [tool] },
+      {
+        model,
+        streamFn,
+        tools: [tool],
+        convertToLlm: (messages) =>
+          messages.filter((message) => message.role !== "custom") as never,
+      },
+      async (event) => {
+        events.push(event);
+      },
+      new AbortController().signal,
+    );
+    expect(call).toBe(1);
+    expect(events[events.length - 1]?.type).toBe("agent_end");
+  });
+
+  it("survives a streamFn that throws synchronously", async () => {
+    const events: AgentEvent[] = [];
+    const streamFn: StreamFn = () => {
+      throw new Error("boom");
+    };
+    await runAgentLoop(
+      ["go"],
+      { systemPrompt: "s", messages: [], tools: [] },
+      {
+        model,
+        streamFn,
+        tools: [],
+        convertToLlm: (messages) =>
+          messages.filter((message) => message.role !== "custom") as never,
+      },
+      async (event) => {
+        events.push(event);
+      },
+      new AbortController().signal,
+    );
+    expect(events.some((event) => event.type === "turn_start")).toBe(true);
+    expect(events.some((event) => event.type === "turn_end")).toBe(true);
+    const end = events.find((event) => event.type === "agent_end");
+    expect(end?.type).toBe("agent_end");
+    if (end?.type === "agent_end") {
+      const last = end.messages[end.messages.length - 1];
+      expect(last?.role).toBe("assistant");
+      if (last?.role === "assistant") {
+        expect(last.stopReason).toBe("error");
+        expect(last.errorMessage).toContain("boom");
+      }
     }
   });
 });

@@ -16,7 +16,6 @@ import {
   configPath,
   loadAuth,
   loadConfig,
-  resolveApiKey,
   resolveModel,
   writeJsonAtomic,
   type AuthStore,
@@ -26,7 +25,6 @@ import {
 import { importPi } from "./config/import-pi.js";
 import { ResourceLoader } from "./resources/index.js";
 import { installRegistrySkill, searchSkillRegistry, type RegistrySkill } from "./resources/skills-registry.js";
-import { buildSystemPrompt } from "./prompt/system.js";
 import { ExtensionHost } from "./extensions/host.js";
 import { McpManager } from "./mcp/manager.js";
 import { loadMcpConfig } from "./mcp/config.js";
@@ -35,7 +33,10 @@ import { AgentSession } from "./session/session.js";
 import { SessionManager } from "./session/manager.js";
 import { expandTemplate } from "./resources/prompts.js";
 
-const VERSION = "0.1.0";
+declare const __CLETUS_VERSION__: string | undefined;
+// Injected by scripts/bundle.mjs; the literal keeps unbundled runs working.
+const VERSION =
+  typeof __CLETUS_VERSION__ === "string" ? __CLETUS_VERSION__ : "0.1.0";
 const execFileAsync = promisify(execFile);
 const BUILTIN_COMMANDS = [
   "help",
@@ -76,7 +77,7 @@ Options:
 Subcommands:
   cletus mcp add|list|remove
   cletus sessions list
-  cletus skills list|enable|disable
+  cletus skills list|set|enable|disable
   cletus permissions list|add|remove|reset
   cletus import-pi [--from <piHome>] [--force]`;
 }
@@ -307,7 +308,7 @@ async function runTui(opts: {
       assistantText = "";
       thinkingText = "";
       app.appendBlock({ id: assistantId, kind: "assistant", text: "", thinking: "" });
-    } else if (event.type === "message_update" && event.delta.type === "text") {
+    } else if (event.type === "message_update" && event.delta?.type === "text") {
       if (!assistantId) {
         assistantId = `a${blockCounter++}`;
         app.appendBlock({ id: assistantId, kind: "assistant", text: "", thinking: "" });
@@ -318,7 +319,7 @@ async function runTui(opts: {
         text: assistantText,
         thinking: thinkingText,
       });
-    } else if (event.type === "message_update" && event.delta.type === "thinking") {
+    } else if (event.type === "message_update" && event.delta?.type === "thinking") {
       if (!assistantId) {
         assistantId = `a${blockCounter++}`;
         app.appendBlock({ id: assistantId, kind: "assistant", text: "", thinking: "" });
@@ -337,12 +338,13 @@ async function runTui(opts: {
       if (text || thinking) {
         if (!assistantId) {
           assistantId = `a${blockCounter++}`;
-          app.appendBlock({ id: assistantId, kind: "assistant", text, thinking });
+          app.appendBlock({ id: assistantId, kind: "assistant", text, thinking, done: true });
         } else {
           app.updateBlock(assistantId, {
             kind: "assistant",
             text: assistantText,
             thinking: thinkingText,
+            done: true,
           });
         }
       }
@@ -594,6 +596,7 @@ async function runTui(opts: {
           if (approved !== "allow" && approved !== "session") return;
           app?.notify(`Installing ${entry.source}/${entry.skillId}…`);
           await installRegistrySkill(entry);
+          opts.resources.reload();
           await opts.resources.load();
           syncSkillCommands();
           app?.notify(`Installed ${entry.name}`);
@@ -657,6 +660,7 @@ async function runTui(opts: {
         } catch (error) {
           app?.notify(error instanceof Error ? error.message : String(error), "error");
         }
+        opts.resources.reload();
         await opts.resources.load();
         syncSkillCommands();
         if (changed) app?.notify("Skills saved");
@@ -1043,7 +1047,7 @@ async function runPrint(opts: {
       process.stdout.write(`${serialize(event)}\n`);
       return;
     }
-    if (event.type === "message_update" && event.delta.type === "text") {
+    if (event.type === "message_update" && event.delta?.type === "text") {
       printed += event.delta.text;
       process.stdout.write(event.delta.text);
     } else if (event.type === "tool_execution_start") {
@@ -1053,6 +1057,15 @@ async function runPrint(opts: {
       process.stderr.write(`[tool error] ${text}\n`);
     }
   });
+  // Abort in-band so cleanup runs and the exit code reflects the signal.
+  let signaled = false;
+  const onSignal = (): void => {
+    if (signaled) process.exit(130);
+    signaled = true;
+    session.abort();
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
   try {
     await session.prompt(opts.prompt);
     const final = session.getLastAssistantText();
@@ -1068,6 +1081,8 @@ async function runPrint(opts: {
     process.stdout.write("\n");
     return stopReason === "aborted" ? 130 : stopReason === "error" ? 1 : 0;
   } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
     unsubscribe();
     await session.dispose();
   }
@@ -1158,7 +1173,13 @@ async function skillsCommand(argv: string[]): Promise<number> {
   const name = argv[1];
   const home = cletusHome();
   const config = await loadConfig(home);
-  const loader = new ResourceLoader(process.cwd(), home, config.skillOverrides);
+  const trust = await readTrust(home);
+  const loader = new ResourceLoader(
+    process.cwd(),
+    home,
+    config.skillOverrides,
+    trust[process.cwd()] === true,
+  );
   const loaded = await loader.load();
   if (action === "list") {
     if (loaded.skills.length === 0) {
@@ -1307,7 +1328,9 @@ async function main(): Promise<number> {
   if (config.models.length === 0) {
     if (interactive) {
       if (await askYesNo("Import pi models from ~/.pi?")) {
-        await importPi({ home });
+        // loadConfig auto-created an empty default config; importing over it
+        // is the intended first-run flow.
+        await importPi({ home, force: true });
         config = await loadConfig(home);
         auth = await loadAuth(authPath(home));
       }
@@ -1320,7 +1343,7 @@ async function main(): Promise<number> {
 
   const model = resolveModel(config, auth, parsed.values.model);
   const trustProject = await decideTrust(cwd, home, interactive, parsed.values.trust === true);
-  const resources = new ResourceLoader(cwd, home, config.skillOverrides);
+  const resources = new ResourceLoader(cwd, home, config.skillOverrides, trustProject);
   await resources.load();
 
   const extensions = new ExtensionHost({
@@ -1329,14 +1352,14 @@ async function main(): Promise<number> {
     trustProject,
     builtinToolNames: BUILTIN_TOOLS,
     builtinCommands: BUILTIN_COMMANDS,
-    notify: (text, level) => process.stderr.write(`${text}\n`),
+    notify: (text) => process.stderr.write(`${text}\n`),
   });
   if (!parsed.values["no-extensions"]) await extensions.load();
   const mcp = await McpManager.create(cwd, home, { trustProject });
 
   let manager: SessionManager;
   if (parsed.values.resume) {
-    const infos = await SessionManager.list(cwd, { home });
+    const infos = await SessionManager.list(cwd, { home, limit: Number.MAX_SAFE_INTEGER });
     const found = infos.find((info) => info.id === parsed.values.resume || info.filePath === parsed.values.resume);
     if (!found) throw new ConfigError(`Session not found: ${parsed.values.resume}`);
     manager = await SessionManager.open(found.filePath);

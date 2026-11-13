@@ -22,21 +22,18 @@ export type Skill = {
 };
 
 function parseFrontmatter(text: string): { meta: Record<string, unknown>; body: string } {
-  if (!text.startsWith("---\n") && !text.startsWith("---\r\n")) {
-    return { meta: {}, body: text };
-  }
-  const end = text.indexOf("\n---", 3);
-  if (end < 0) return { meta: {}, body: text };
-  const raw = text.slice(3, end).trim();
-  const headerEnd = text.indexOf("\n", end + 1);
+  const source = text.startsWith("\ufeff") ? text.slice(1) : text;
+  // The closing delimiter must be a full line, not a prefix of ---- or ---foo.
+  const match = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(source);
+  if (!match) return { meta: {}, body: source };
   let meta: Record<string, unknown> = {};
   try {
-    const parsed = parseYaml(raw);
+    const parsed = parseYaml(match[1] ?? "");
     if (parsed && typeof parsed === "object") meta = parsed as Record<string, unknown>;
   } catch {
     meta = {};
   }
-  return { meta, body: headerEnd >= 0 ? text.slice(headerEnd + 1) : "" };
+  return { meta, body: source.slice(match[0].length) };
 }
 
 const MAX_SKILL_DEPTH = 8;
@@ -98,6 +95,7 @@ export async function loadSkills(
   cwd: string,
   home: string,
   overrides: Record<string, SkillVisibility> = {},
+  trustProject = false,
 ): Promise<{ skills: Skill[]; roots: string[] }> {
   const root = await findRepoRoot(cwd);
   const userHome = homedir();
@@ -106,18 +104,25 @@ export async function loadSkills(
     { dir: join(home, ".agents", "skills"), source: "personal" },
     { dir: join(userHome, ".agents", "skills"), source: "personal" },
     { dir: join(userHome, ".claude", "skills"), source: "personal" },
-    { dir: join(cwd, ".cletus", "skills"), source: "project" },
-    { dir: join(cwd, ".agents", "skills"), source: "project" },
-    { dir: join(cwd, ".claude", "skills"), source: "project" },
   ];
-  let current = cwd;
-  for (;;) {
-    dirs.push({ dir: join(current, ".agents", "skills"), source: "ancestor" });
-    dirs.push({ dir: join(current, ".claude", "skills"), source: "ancestor" });
-    if (current === root) break;
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
+  // Project/ancestor skills can inject instructions and slash commands, so
+  // they require the same trust decision as extensions and MCP servers.
+  if (trustProject) {
+    dirs.push(
+      { dir: join(cwd, ".cletus", "skills"), source: "project" },
+      { dir: join(cwd, ".agents", "skills"), source: "project" },
+      { dir: join(cwd, ".claude", "skills"), source: "project" },
+    );
+    let current = cwd;
+    for (;;) {
+      dirs.push({ dir: join(current, ".cletus", "skills"), source: "ancestor" });
+      dirs.push({ dir: join(current, ".agents", "skills"), source: "ancestor" });
+      dirs.push({ dir: join(current, ".claude", "skills"), source: "ancestor" });
+      if (current === root) break;
+      const parent = dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
   }
 
   const seenPaths = new Set<string>();

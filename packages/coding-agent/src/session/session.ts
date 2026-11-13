@@ -20,7 +20,7 @@ import { createSubagentRunner } from "../subagent.js";
 import { createTaskTool } from "../tools/task.js";
 import { SessionManager } from "./manager.js";
 import { buildProjection } from "./context.js";
-import { compact } from "./compaction.js";
+import { compact, shouldCompact } from "./compaction.js";
 import type { McpManager } from "../mcp/manager.js";
 import type { ExtensionHost } from "../extensions/host.js";
 
@@ -47,7 +47,7 @@ export class AgentSession {
   private readonly home: string;
   private resources: Awaited<ReturnType<ResourceLoader["load"]>>;
   private readonly streamFn: StreamFn;
-  private readonly persisted = new Set<string>();
+  private readonly persisted = new WeakSet<AgentMessage>();
   private systemPrompt = "";
 
   private constructor(options: CreateSessionOptions, manager: SessionManager) {
@@ -59,6 +59,7 @@ export class AgentSession {
     this.agent = new Agent({
       model: this.model,
       streamFn: this.streamFn,
+      cwd: options.cwd,
       initialState: { messages: [], tools: [] },
       getApiKey: (model) => resolveApiKey(options.config, options.auth, model),
       prepareRequest: (ctx) => this.prepareRequest(ctx),
@@ -161,6 +162,9 @@ export class AgentSession {
       names.add(tool.name);
       tools.push(tool);
     }
+    this.options.permissions.setExtraTools(
+      (this.options.extensions?.getTools() ?? []).map((tool) => tool.name),
+    );
     this.agent.setTools(tools);
     this.systemPrompt = buildSystemPrompt({
       cwd: this.options.cwd,
@@ -170,15 +174,6 @@ export class AgentSession {
     });
   }
 
-  private keyOf(message: AgentMessage): string {
-    if (message.role === "toolResult") {
-      return `tool:${message.toolCallId}`;
-    }
-    return `${message.role}:${message.timestamp}:${
-      message.role === "assistant" ? message.content.length : ""
-    }`;
-  }
-
   private handleEvent(event: AgentEvent): Promise<void> | void {
     if (event.type === "message_end") {
       if (
@@ -186,10 +181,19 @@ export class AgentSession {
         event.message.role === "assistant" ||
         event.message.role === "toolResult"
       ) {
-        const key = this.keyOf(event.message);
-        if (this.persisted.has(key)) return;
-        this.persisted.add(key);
-        return this.manager.appendMessage(event.message).then(() => undefined);
+        // Message identity, not a synthetic key: distinct messages can share
+        // a timestamp (or a provider can reuse a tool call id).
+        if (this.persisted.has(event.message)) return;
+        this.persisted.add(event.message);
+        return this.manager.appendMessage(event.message).then(
+          () => undefined,
+          (error: unknown) => {
+            this.options.onNotice?.(
+              `Failed to save session: ${error instanceof Error ? error.message : String(error)}`,
+              "error",
+            );
+          },
+        );
       }
     }
     if (event.type === "turn_end") {
@@ -254,12 +258,15 @@ export class AgentSession {
     };
     const tokens = estimateContextTokens(llm);
     const reserve = this.options.config.compaction.reserveTokens;
-    if (tokens > this.model.contextWindow - reserve) {
+    if (shouldCompact(tokens, this.model, this.options.config.compaction)) {
       this.options.onNotice?.("Compacting context...");
       const apiKey = resolveApiKey(this.options.config, this.options.auth, this.model);
+      // The trigger above already decided; force so compact() does not
+      // re-check with a different (messages-only) token accounting.
       await compact(this.manager, this.model, this.streamFn, {
         keepRecentTokens: this.options.config.compaction.keepRecentTokens,
         reserveTokens: reserve,
+        force: true,
         ...(apiKey ? { apiKey } : {}),
       });
       const projection = buildProjection(this.manager);

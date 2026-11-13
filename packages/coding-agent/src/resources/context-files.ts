@@ -1,5 +1,6 @@
 import { access, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 export type ContextFile = { path: string; content: string };
 const MAX_BYTES = 32768;
@@ -27,7 +28,10 @@ async function readContext(path: string): Promise<ContextFile | undefined> {
   try {
     let content = await readFile(path, "utf8");
     if (Buffer.byteLength(content) > MAX_BYTES) {
-      content = `${content.slice(0, MAX_BYTES)}\n[truncated]`;
+      // Truncate by bytes, not UTF-16 units; the decoder drops any partial
+      // multibyte character at the cut.
+      const decoder = new StringDecoder("utf8");
+      content = `${decoder.write(Buffer.from(content, "utf8").subarray(0, MAX_BYTES))}\n[truncated]`;
     }
     return { path, content };
   } catch {
@@ -40,7 +44,9 @@ export async function loadContextFiles(
   home: string,
 ): Promise<ContextFile[]> {
   const files: ContextFile[] = [];
-  const global = await readContext(join(home, "AGENTS.md"));
+  const global =
+    (await readContext(join(home, "AGENTS.md"))) ??
+    (await readContext(join(home, "CLAUDE.md")));
   if (global) files.push(global);
 
   const root = await findRepoRoot(cwd);

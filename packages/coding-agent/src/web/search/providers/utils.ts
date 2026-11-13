@@ -1,10 +1,18 @@
+function fromCodePoint(code: number): string {
+  // Out-of-range values and lone surrogates throw in String.fromCodePoint.
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
+    return "\ufffd";
+  }
+  return String.fromCodePoint(code);
+}
+
 export function decodeHtml(text: string): string {
   return text
     .replace(/&#x([0-9a-f]+);/gi, (_match, code: string) =>
-      String.fromCodePoint(Number.parseInt(code, 16)),
+      fromCodePoint(Number.parseInt(code, 16)),
     )
     .replace(/&#(\d+);/g, (_match, code: string) =>
-      String.fromCodePoint(Number.parseInt(code, 10)),
+      fromCodePoint(Number.parseInt(code, 10)),
     )
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")

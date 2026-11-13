@@ -76,7 +76,10 @@ export async function installRegistrySkill(
     `https://api.github.com/repos/${skill.source}/git/trees/HEAD?recursive=1`,
     signal,
   );
-  const sha = typeof tree["sha"] === "string" ? tree["sha"] : "HEAD";
+  // git/trees returns the tree object SHA; raw.githubusercontent.com needs
+  // the commit SHA, so resolve HEAD explicitly.
+  const commit = await json(`https://api.github.com/repos/${skill.source}/commits/HEAD`, signal);
+  const sha = typeof commit["sha"] === "string" ? commit["sha"] : "HEAD";
   const entries = Array.isArray(tree["tree"]) ? tree["tree"] : [];
   const files = entries.filter(
     (entry): entry is TreeEntry =>

@@ -84,11 +84,27 @@ describe("TuiApp", () => {
     await test.dispose();
   });
 
-  it("matches clipboard keybindings", () => {
+  it("matches clipboard keybindings without collapsing modifiers", () => {
     const bindings = new KeybindingsManager();
     expect(bindings.matches({ name: "c", super: true }, "copy")).toBe(true);
     expect(bindings.matches({ name: "v", super: true }, "paste")).toBe(true);
     expect(bindings.matches({ name: "v", ctrl: true, shift: true }, "paste")).toBe(true);
+    // Ctrl+Shift+C is copy, not the Ctrl+C abort binding.
+    expect(bindings.matches({ name: "c", ctrl: true, shift: true }, "copy")).toBe(true);
+    expect(bindings.matches({ name: "c", ctrl: true, shift: true }, "abort")).toBe(false);
+    // Capital letters still answer modals.
+    expect(bindings.matches({ name: "y", shift: true }, "modalAllow")).toBe(true);
+    // Modifier order in overrides is canonicalized.
+    const reordered = new KeybindingsManager({ copy: "shift+ctrl+x" });
+    expect(reordered.matches({ name: "x", ctrl: true, shift: true }, "copy")).toBe(true);
+  });
+
+  it("falls back safely for prototype-key theme names", () => {
+    const theme = getTheme("toString");
+    expect(theme.name).toBe("dark");
+    expect(theme.colors.inputBorder).toBeTruthy();
+    const symbols = getTheme("dark", { preset: "constructor" as never, overrides: { toString: "x" } });
+    expect(symbols.symbol("app")).toBe("\uf120");
   });
 
   it("switches symbol presets", async () => {
@@ -408,6 +424,32 @@ describe("TuiApp", () => {
     expect(frame).toContain("one");
     expect(frame).toContain("read");
     expect(frame).toContain("file contents");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
+  it("navigates input history with Up and Down and restores the draft", async () => {
+    const ctx = await setupApp();
+    ctx.mockInput.typeText("first prompt");
+    ctx.mockInput.pressEnter();
+    await ctx.flush();
+    ctx.mockInput.typeText("second prompt");
+    ctx.mockInput.pressEnter();
+    await ctx.flush();
+
+    ctx.mockInput.typeText("draft");
+    ctx.mockInput.pressKey("up");
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("second prompt");
+    ctx.mockInput.pressKey("up");
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("first prompt");
+    ctx.mockInput.pressKey("down");
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("second prompt");
+    ctx.mockInput.pressKey("down");
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("draft");
     ctx.app.stop();
     await ctx.dispose();
   });

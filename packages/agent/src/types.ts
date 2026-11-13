@@ -73,6 +73,8 @@ export type AgentOptions = {
   };
   streamFn: StreamFn;
   model: Model;
+  /** Working directory reported to tools; defaults to process.cwd(). */
+  cwd?: string;
   getApiKey?: (model: Model) => string | undefined;
   convertToLlm?: (messages: AgentMessage[]) => Message[];
   beforeToolCall?: (
@@ -94,7 +96,7 @@ export type AgentEvent =
   | {
       type: "message_update";
       message: AgentMessage;
-      delta:
+      delta?:
         | { type: "text"; text: string }
         | { type: "thinking"; text: string }
         | { type: "toolcall"; index: number; delta: string };
@@ -111,6 +113,7 @@ export type AgentLoopConfig = {
   streamFn: StreamFn;
   getApiKey?: (model: Model) => string | undefined;
   tools: AgentTool[];
+  cwd?: string;
   maxTurns?: number;
   convertToLlm: (messages: AgentMessage[]) => Message[];
   prepareRequest?: AgentOptions["prepareRequest"];

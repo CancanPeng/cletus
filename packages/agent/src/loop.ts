@@ -15,7 +15,6 @@ import type {
   AgentLoopConfig,
   AgentMessage,
   AgentTool,
-  ToolResult,
 } from "./types.js";
 
 export type Emit = (event: AgentEvent) => Promise<void>;
@@ -47,7 +46,14 @@ async function consumeStream(
 ): Promise<AssistantMessage> {
   let text = "";
   let thinking = "";
+  const toolCalls = new Map<number, ToolCallContent>();
   const partial: AssistantMessage = assistantMessage(model, [], "stop");
+  const rebuild = (): void => {
+    partial.content = [
+      ...contentFor(text, thinking),
+      ...[...toolCalls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => call),
+    ];
+  };
   let final: AssistantMessage | undefined;
 
   for await (const event of stream) {
@@ -55,7 +61,7 @@ async function consumeStream(
       await emit({ type: "message_start", message: partial });
     } else if (event.type === "text_delta") {
       text += event.delta;
-      partial.content = contentFor(text, thinking);
+      rebuild();
       await emit({
         type: "message_update",
         message: partial,
@@ -63,25 +69,37 @@ async function consumeStream(
       });
     } else if (event.type === "thinking_delta") {
       thinking += event.delta;
-      partial.content = contentFor(text, thinking);
+      rebuild();
       await emit({
         type: "message_update",
         message: partial,
         delta: { type: "thinking", text: event.delta },
       });
+    } else if (event.type === "toolcall_start") {
+      toolCalls.set(event.index, {
+        type: "toolCall",
+        id: event.id,
+        name: event.name,
+        arguments: {},
+      });
+      rebuild();
+      await emit({ type: "message_update", message: partial });
     } else if (event.type === "toolcall_delta") {
       await emit({
         type: "message_update",
         message: partial,
         delta: { type: "toolcall", index: event.index, delta: event.delta },
       });
+    } else if (event.type === "toolcall_end") {
+      toolCalls.set(event.index, event.toolCall);
+      rebuild();
+      await emit({ type: "message_update", message: partial });
     } else if (event.type === "done" || event.type === "error") {
       final = event.message;
     }
   }
 
   const result = final ?? assistantMessage(model, contentFor(text, thinking), "stop");
-  if (!final) result.content = contentFor(text, thinking);
   await emit({ type: "message_end", message: result });
   return result;
 }
@@ -100,13 +118,17 @@ export async function runAgentLoop(
   const maxTurns = config.maxTurns ?? 100;
   let turn = 0;
 
+  const appendQueued = async (texts: string[]): Promise<void> => {
+    for (const text of texts) {
+      const message = userMessage(text);
+      messages.push(message);
+      await emitMessage(emit, message);
+    }
+  };
+
   await emit({ type: "agent_start" });
 
-  for (const prompt of prompts) {
-    const message = userMessage(prompt);
-    messages.push(message);
-    await emitMessage(emit, message);
-  }
+  await appendQueued(prompts);
 
   if (prompts.length === 0 && messages.length === 0) {
     await emit({ type: "agent_end", messages });
@@ -119,14 +141,19 @@ export async function runAgentLoop(
       aborted.stopReason = "aborted";
       messages.push(aborted);
       await emitMessage(emit, aborted);
+      await emit({ type: "turn_end", message: aborted, toolResults: [] });
       break;
     }
     if (turn >= maxTurns) {
       const limited = errorAssistant(model, `Max turns exceeded (${maxTurns})`);
       messages.push(limited);
       await emitMessage(emit, limited);
+      await emit({ type: "turn_end", message: limited, toolResults: [] });
       break;
     }
+
+    turn += 1;
+    await emit({ type: "turn_start", turn });
 
     if (config.prepareRequest) {
       try {
@@ -146,51 +173,62 @@ export async function runAgentLoop(
       }
     }
 
-    turn += 1;
-    await emit({ type: "turn_start", turn });
-
-    const llmContext: LlmContext = {
-      systemPrompt,
-      messages: config.convertToLlm(messages),
-      tools: tools.map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters,
-      })),
-    };
-    const apiKey = config.getApiKey?.(model);
-    const stream = config.streamFn(model, llmContext, {
-      signal,
-      ...(apiKey !== undefined ? { apiKey } : {}),
-    });
     let assistant: AssistantMessage;
     try {
+      const llmContext: LlmContext = {
+        systemPrompt,
+        messages: config.convertToLlm(messages),
+        tools: tools.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        })),
+      };
+      const apiKey = config.getApiKey?.(model);
+      const stream = config.streamFn(model, llmContext, {
+        signal,
+        ...(apiKey !== undefined ? { apiKey } : {}),
+      });
       assistant = await consumeStream(stream, model, emit);
     } catch (error) {
       assistant = errorAssistant(
         model,
         error instanceof Error ? error.message : String(error),
       );
-      messages.push(assistant);
-      await emitMessage(emit, assistant);
-      await emit({ type: "turn_end", message: assistant, toolResults: [] });
-      break;
     }
 
     messages.push(assistant);
 
-    if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
-      await emit({ type: "turn_end", message: assistant, toolResults: [] });
-      break;
-    }
-
     const calls = assistant.content.filter(
       (block): block is ToolCallContent => block.type === "toolCall",
     );
+    const failed = assistant.stopReason === "error" || assistant.stopReason === "aborted";
     const toolResults: Message[] = [];
-    if (calls.length > 0) {
-      for (const call of calls) {
-        if (signal.aborted) break;
+    const recordResult = async (call: ToolCallContent, text: string): Promise<void> => {
+      const message: Message = {
+        role: "toolResult",
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [{ type: "text", text }],
+        isError: true,
+        timestamp: Date.now(),
+      };
+      messages.push(message);
+      toolResults.push(message);
+      await emitMessage(emit, message);
+    };
+
+    let terminated = false;
+    if (!failed) {
+      for (const [index, call] of calls.entries()) {
+        if (signal.aborted || terminated) {
+          // Every tool call must be answered, or providers reject the next
+          // request (tool_use without tool_result).
+          for (const pending of calls.slice(index)) {
+            await recordResult(pending, "Tool call cancelled");
+          }
+          break;
+        }
         await emit({
           type: "tool_execution_start",
           toolCallId: call.id,
@@ -201,15 +239,16 @@ export async function runAgentLoop(
           call,
           tools,
           {
-            cwd: process.cwd(),
+            cwd: config.cwd ?? process.cwd(),
             toolCallId: call.id,
             signal,
             onUpdate: (partial) => {
+              // Fire-and-forget progress; Agent.emit isolates listener errors.
               void emit({
                 type: "tool_execution_update",
                 toolCallId: call.id,
                 partial,
-              });
+              }).catch(() => undefined);
             },
           },
           {
@@ -244,53 +283,23 @@ export async function runAgentLoop(
         messages.push(message);
         toolResults.push(message);
         await emitMessage(emit, message);
-        if (result.terminate) break;
+        terminated = result.terminate === true;
+      }
+    } else {
+      for (const call of calls) {
+        await recordResult(call, "Tool call cancelled");
       }
     }
 
     await emit({ type: "turn_end", message: assistant, toolResults });
 
-    if (calls.length > 0) {
-      let steering = config.drainSteering?.() ?? [];
-      if (steering.length > 0) {
-        for (const text of steering) {
-          const message = userMessage(text);
-          messages.push(message);
-          await emitMessage(emit, message);
-        }
-        continue;
-      }
-      const followUp = config.drainFollowUp?.() ?? [];
-      if (followUp.length > 0) {
-        for (const text of followUp.slice(0, 1)) {
-          const message = userMessage(text);
-          messages.push(message);
-          await emitMessage(emit, message);
-        }
-        continue;
-      }
-      continue;
-    }
+    if (failed || terminated) break;
 
     const steering = config.drainSteering?.() ?? [];
-    if (steering.length > 0) {
-      for (const text of steering) {
-        const message = userMessage(text);
-        messages.push(message);
-        await emitMessage(emit, message);
-      }
-      continue;
-    }
+    await appendQueued(steering);
     const followUp = config.drainFollowUp?.() ?? [];
-    if (followUp.length > 0) {
-      for (const text of followUp.slice(0, 1)) {
-        const message = userMessage(text);
-        messages.push(message);
-        await emitMessage(emit, message);
-      }
-      continue;
-    }
-    break;
+    await appendQueued(followUp);
+    if (calls.length === 0 && steering.length === 0 && followUp.length === 0) break;
   }
 
   await emit({ type: "agent_end", messages });

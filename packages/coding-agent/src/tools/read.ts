@@ -39,14 +39,15 @@ export function createReadTool(deps: {
       try {
         const size = Math.min(info.size, MAX_BYTES);
         const buffer = Buffer.alloc(size);
-        await handle.read(buffer, 0, size, 0);
-        if (buffer.includes(0)) {
+        const { bytesRead } = await handle.read(buffer, 0, size, 0);
+        const data = buffer.subarray(0, bytesRead);
+        if (data.includes(0)) {
           return {
             isError: true,
             content: [{ type: "text", text: `Cannot read binary file: ${path}` }],
           };
         }
-        const allLines = buffer.toString("utf8").split("\n");
+        const allLines = data.toString("utf8").split("\n");
         const selected = allLines.slice(offset - 1, offset - 1 + limit);
         const numbered = selected.map(
           (line, index) => `${String(offset + index).padStart(6)}\t${line}`,

@@ -17,6 +17,7 @@ export class Agent {
   private model: Model;
   private running = false;
   private controller: AbortController | undefined;
+  private abortRequested = false;
   private readonly steering: string[] = [];
   private readonly followUps: string[] = [];
   private idle = Promise.resolve();
@@ -33,8 +34,8 @@ export class Agent {
   get state(): AgentState {
     return {
       systemPrompt: this.systemPrompt,
-      messages: this.messages,
-      tools: this.tools,
+      messages: [...this.messages],
+      tools: [...this.tools],
       model: this.model,
       isStreaming: this.running,
     };
@@ -59,8 +60,9 @@ export class Agent {
 
   async prompt(text: string): Promise<void> {
     if (this.running) throw new Error("Agent is already running; use steer() or followUp()");
-    const prompts = [text, ...this.steering.splice(0), ...this.followUps.splice(0)];
-    await this.run(prompts);
+    // Queued steering/follow-ups stay queued: the loop drains them per turn,
+    // so nothing is lost if the run fails before the first drain.
+    await this.run([text]);
   }
 
   async continue(): Promise<void> {
@@ -82,7 +84,12 @@ export class Agent {
   }
 
   abort(): void {
-    this.controller?.abort();
+    if (this.controller) {
+      this.controller.abort();
+    } else {
+      // Remember aborts issued before the first run (e.g. dispose()).
+      this.abortRequested = true;
+    }
   }
 
   async waitForIdle(): Promise<void> {
@@ -122,6 +129,10 @@ export class Agent {
   private async run(prompts: string[]): Promise<void> {
     this.running = true;
     this.controller = new AbortController();
+    if (this.abortRequested) {
+      this.controller.abort();
+      this.abortRequested = false;
+    }
     const idle = Promise.withResolvers<void>();
     this.idle = idle.promise;
     this.resolveIdle = idle.resolve;
@@ -136,6 +147,7 @@ export class Agent {
         {
           model: this.model,
           streamFn: this.options.streamFn,
+          ...(this.options.cwd !== undefined ? { cwd: this.options.cwd } : {}),
           ...(this.options.getApiKey ? { getApiKey: this.options.getApiKey } : {}),
           tools: this.tools,
           ...(this.options.maxTurns !== undefined ? { maxTurns: this.options.maxTurns } : {}),

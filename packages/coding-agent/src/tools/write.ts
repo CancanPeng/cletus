@@ -1,5 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { mkdir, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { dirname, join } from "node:path";
 import type { AgentTool, ToolResult } from "@cletus/agent";
 import type { PermissionPolicy } from "../permissions/policy.js";
 
@@ -22,7 +23,10 @@ export function createWriteTool(deps: { policy: PermissionPolicy }): AgentTool {
       const content = String(params["content"] ?? "");
       const path = await deps.policy.resolveWrite(input);
       await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, content, "utf8");
+      // Atomic replace so a crash never leaves a half-written file.
+      const temp = join(dirname(path), `.${randomUUID()}.cletus.tmp`);
+      await writeFile(temp, content, "utf8");
+      await rename(temp, path);
       return {
         content: [
           { type: "text", text: `Wrote ${Buffer.byteLength(content)} bytes to ${path}` },

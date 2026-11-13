@@ -39,7 +39,7 @@ cletus --json -p "List the TODOs" | jq .
 
 ## Permissions
 
-Read tools are confined to the working directory plus configured skill/prompt roots. Writes and command execution require confirmation. `--yolo` disables confirmations; use it only in trusted workspaces. Non-interactive `-p`/`--json` runs deny writes and commands unless `--yolo` is passed.
+Read tools are confined to the working directory plus configured skill/prompt roots. Writes and command execution require confirmation. `--yolo` disables confirmations; use it only in trusted workspaces. Non-interactive `-p`/`--json` runs deny writes and commands unless `--yolo` is passed or the write path matches the persistent allowlist below.
 
 Persistent write allowlist (glob patterns relative to the current cwd):
 
@@ -87,7 +87,7 @@ Keybinding changes apply on the next launch. `/theme` switches and persists imme
 
 ## Status bar
 
-Icons: `◆` app, `◈` model, `⌂` cwd, `⎇` git branch, `▣` session, `✓` ready, `▤` context usage, `◷` last duration, `≡` queued, `▲` YOLO, `⚑` permission, `❖` skills manager.
+Icons (unicode preset shown; the default `nerd` preset uses Nerd Font glyphs): `◆` app, `◈` model, `⌂` cwd, `⎇` git branch, `▣` session, `✓` ready, `▤` context usage, `◷` last duration, `≡` queued, `▲` YOLO, `⚑` permission, `❖` skills manager.
 
 Symbol presets:
 
@@ -148,7 +148,7 @@ cletus skills disable demo  # alias for off
 
 ## Parallel curl
 
-The built-in `curl` tool fetches up to 20 HTTP/HTTPS URLs with up to 8 concurrent `curl` processes. Each response is labeled with its URL and HTTP status; bodies are capped at 8 KB each. It requires confirmation unless `--yolo` is active.
+The built-in `curl` tool fetches up to 20 HTTP/HTTPS URLs with up to 8 concurrent `curl` processes. Each response is labeled with its URL and HTTP status; bodies are capped at 8,000 characters each. It requires confirmation unless `--yolo` is active.
 
 ## Web search
 
@@ -182,10 +182,12 @@ The tool supports `site:`, `-site:`, `filetype:` constraints and `recency` filte
 ## Project resources
 
 - `AGENTS.md` / `CLAUDE.md` (global and project) are injected into the system prompt.
-- Skills: `~/.cletus/skills`, `~/.agents/skills`, `~/.claude/skills`, plus `.cletus/skills`, `.agents/skills`, and `.claude/skills` in the project and ancestors.
-- Prompt templates: `~/.cletus/prompts/*.md`, `.cletus/prompts/*.md`.
+- Skills: `~/.cletus/skills`, `~/.agents/skills`, `~/.claude/skills` always load. Project skills (`.cletus/skills`, `.agents/skills`, `.claude/skills` in the project and ancestors) require project trust.
+- Prompt templates: `~/.cletus/prompts/*.md` always load; `.cletus/prompts/*.md` requires project trust.
 - Extensions: `~/.cletus/extensions/*.ts`, `.cletus/extensions/*.ts` (requires project trust).
-- MCP: `~/.cletus/mcp.json`, `.cletus/mcp.json`. Servers connect in the background, so the TUI opens immediately; `MCP ready` appears when tools are registered.
+- MCP: `~/.cletus/mcp.json`, `.cletus/mcp.json` (project servers require trust). Servers connect in the background, so the TUI opens immediately; `MCP ready` appears when tools are registered.
+
+Project trust is requested on first interactive run in a directory that has `.cletus` resources, or granted with `--trust`. Untrusted project resources are ignored, so a cloned repository cannot inject instructions, tools, or commands without your approval.
 
 ## License
 

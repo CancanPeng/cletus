@@ -6,7 +6,6 @@ import {
   type StreamFn,
 } from "@cletus/ai";
 import type { SessionManager } from "./manager.js";
-import { buildProjection } from "./context.js";
 import type { SessionEntry } from "./types.js";
 
 export type CompactionConfig = { reserveTokens: number; keepRecentTokens: number };
@@ -59,6 +58,28 @@ export function selectCut(branch: SessionEntry[], keepRecentTokens: number): num
           entry?.type === "message" &&
           (entry.message.role === "user" || entry.message.role === "assistant")
         ) {
+          // Never keep an assistant message without all of its tool results:
+          // providers reject a tool_use that has no matching tool_result.
+          if (entry.message.role === "assistant") {
+            const callIds = new Set(
+              entry.message.content
+                .filter((block) => block.type === "toolCall")
+                .map((block) => block.id),
+            );
+            if (callIds.size > 0) {
+              const answered = new Set<string>();
+              for (let scan = cut + 1; scan < branch.length; scan += 1) {
+                const next = branch[scan];
+                if (next?.type === "message" && next.message.role === "toolResult") {
+                  answered.add(next.message.toolCallId);
+                }
+              }
+              if (![...callIds].every((id) => answered.has(id))) {
+                cut -= 1;
+                continue;
+              }
+            }
+          }
           return cut;
         }
         cut -= 1;

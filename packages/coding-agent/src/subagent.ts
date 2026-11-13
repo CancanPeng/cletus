@@ -25,8 +25,22 @@ export function createSubagentRunner(deps: {
     const agent = new Agent({
       model: deps.model,
       streamFn: deps.streamFn,
+      cwd: deps.cwd,
       initialState: { systemPrompt, tools, messages: [] },
       maxTurns: 30,
+      // Subagents are non-interactive: enforce the same permission model
+      // (writes/commands denied unless yolo or allowlisted).
+      beforeToolCall: async (call, args) => {
+        const record =
+          args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+        const permission = await policy.check(call.name, record);
+        if (!permission.allow) {
+          return permission.reason !== undefined
+            ? { block: true, reason: permission.reason }
+            : { block: true };
+        }
+        return undefined;
+      },
       ...(deps.getApiKey ? { getApiKey: deps.getApiKey } : {}),
     });
 

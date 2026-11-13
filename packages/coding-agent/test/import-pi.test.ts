@@ -88,4 +88,17 @@ describe("importPi", () => {
     );
     expect(resolved).toBe("from-env");
   });
+
+  it("keeps unrelated auth keys when re-importing with --force", async () => {
+    const { home, piHome } = await fixture();
+    await importPi({ home, piHome });
+    const authFile = join(home, "auth.json");
+    const auth = JSON.parse(await readFile(authFile, "utf8")) as { keys: Record<string, string> };
+    auth.keys["manual-provider"] = "sk-manual";
+    await writeFile(authFile, JSON.stringify(auth));
+    await importPi({ home, piHome, force: true });
+    const merged = await loadAuth(authFile);
+    expect(merged.keys["manual-provider"]).toBe("sk-manual");
+    expect(merged.keys["local"]).toBe("sk-literal-secret");
+  });
 });

@@ -18,6 +18,7 @@ let server: Server | undefined;
 afterEach(async () => {
   await new Promise<void>((resolve) => {
     if (!server) return resolve();
+    server.closeAllConnections();
     server.close(() => resolve());
   });
   server = undefined;
@@ -84,6 +85,66 @@ describe("streamAnthropic", () => {
       });
       expect(done.message.usage.input).toBe(10);
       expect(done.message.usage.output).toBe(5);
+    }
+  });
+
+  it("fails the stream on a mid-stream error event", async () => {
+    process.env["FAKE_ANTHROPIC_KEY"] = "test";
+    const port = await listen((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(
+          `data: ${JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 1 } } })}\n\n`,
+        );
+        res.write(
+          `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })}\n\n`,
+        );
+        res.write(
+          `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial" } })}\n\n`,
+        );
+        res.write(
+          `data: ${JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Overloaded" } })}\n\n`,
+        );
+        res.end();
+      });
+    });
+    model.baseUrl = `http://127.0.0.1:${port}`;
+    const events = await collect(
+      streamAnthropic(model, { systemPrompt: "s", messages: [], tools: [] }),
+    );
+    expect(events.some((event) => event.type === "done")).toBe(false);
+    const error = events.find((event) => event.type === "error");
+    expect(error?.type).toBe("error");
+    if (error?.type === "error") {
+      expect(error.error).toContain("Overloaded");
+      expect(error.message.stopReason).toBe("error");
+    }
+  });
+
+  it("fails the stream when the connection ends without message_stop", async () => {
+    process.env["FAKE_ANTHROPIC_KEY"] = "test";
+    const port = await listen((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(
+          `data: ${JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 1 } } })}\n\n`,
+        );
+        res.write(
+          `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "half" } })}\n\n`,
+        );
+        res.end();
+      });
+    });
+    model.baseUrl = `http://127.0.0.1:${port}`;
+    const events = await collect(
+      streamAnthropic(model, { systemPrompt: "s", messages: [], tools: [] }),
+    );
+    const error = events.find((event) => event.type === "error");
+    expect(error?.type).toBe("error");
+    if (error?.type === "error") {
+      expect(error.error).toContain("message_stop");
     }
   });
 });

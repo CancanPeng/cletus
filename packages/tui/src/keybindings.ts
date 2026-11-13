@@ -44,7 +44,6 @@ const ALIASES: Record<string, string> = {
   escape: "esc",
   pageup: "pgup",
   pagedown: "pgdown",
-  "ctrl+return": "ctrl+enter",
 };
 
 export type KeyLike = {
@@ -56,18 +55,30 @@ export type KeyLike = {
   super?: boolean;
 };
 
+const MODIFIERS = ["ctrl", "alt", "shift", "super"] as const;
+
+function canonical(name: string, mods: ReadonlySet<string>): string {
+  const key = ALIASES[name] ?? name;
+  const prefix = MODIFIERS.filter((mod) => mods.has(mod)).map((mod) => `${mod}+`).join("");
+  return `${prefix}${key}`;
+}
+
 function normalize(binding: string): string {
-  const lower = binding.trim().toLowerCase().replace(/\s+/g, "");
-  return ALIASES[lower] ?? lower;
+  const parts = binding.trim().toLowerCase().replace(/\s+/g, "").split("+").filter(Boolean);
+  const name = parts.pop() ?? "";
+  return canonical(name, new Set(parts));
 }
 
 function keyId(key: KeyLike): string {
-  const name = ALIASES[key.name.toLowerCase()] ?? key.name.toLowerCase();
-  if (key.ctrl) return `ctrl+${name}`;
-  if (key.super) return `super+${name}`;
-  if (key.meta || key.option) return `alt+${name}`;
-  if (key.shift) return `shift+${name}`;
-  return name;
+  const mods = new Set<string>();
+  if (key.ctrl) mods.add("ctrl");
+  if (key.meta || key.option) mods.add("alt");
+  // Shift alone on a single letter is just the capital form (modal y/n);
+  // combined with other modifiers it is a distinct chord (ctrl+shift+c).
+  const otherMods = key.ctrl || key.meta || key.option || key.super;
+  if (key.shift && (key.name.length > 1 || otherMods)) mods.add("shift");
+  if (key.super) mods.add("super");
+  return canonical(key.name.toLowerCase(), mods);
 }
 
 export class KeybindingsManager {
@@ -101,7 +112,7 @@ export class KeybindingsManager {
   }
 
   matches(key: KeyLike, action: Action): boolean {
-    return this.get(action).includes(keyId(key));
+    return (this.bindings.get(action) ?? []).includes(keyId(key));
   }
 
   get(action: Action): string[] {

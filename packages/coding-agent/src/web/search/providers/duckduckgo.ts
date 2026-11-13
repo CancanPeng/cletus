@@ -9,12 +9,16 @@ import { clampLimit, decodeHtml, stripHtml } from "./utils.js";
 
 export function parseDuckDuckGoHtml(html: string, limit: number): SearchSource[] {
   const sources: SearchSource[] = [];
-  const anchor = /<a\b[^>]*class="[^"]*\bresult__a\b[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-  const matches = [...html.matchAll(anchor)];
+  const anchor = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  const matches = [...html.matchAll(anchor)].filter((match) =>
+    /class="[^"]*\bresult__a\b[^"]*"/i.test(match[1] ?? ""),
+  );
   for (let index = 0; index < matches.length && sources.length < limit; index += 1) {
     const match = matches[index];
     if (!match) continue;
-    let url = decodeHtml(match[1] ?? "");
+    const href = /href="([^"]+)"/i.exec(match[1] ?? "");
+    if (!href) continue;
+    let url = decodeHtml(href[1] ?? "");
     if (url.startsWith("//")) url = `https:${url}`;
     try {
       const parsed = new URL(url, "https://duckduckgo.com");

@@ -122,4 +122,91 @@ describe("permission policy", () => {
     });
     expect((await yolo.check("write", { path: "a.txt", content: "x" })).allow).toBe(true);
   });
+
+  it("does not leak allowlist matches across path boundaries", async () => {
+    const cwd = await temp();
+    const policy = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: ["src/**"],
+      yolo: false,
+      interactive: false,
+    });
+    expect((await policy.check("write", { path: "src/a.ts", content: "x" })).allow).toBe(true);
+    expect((await policy.check("write", { path: "srcfile.txt", content: "x" })).allow).toBe(false);
+    expect((await policy.check("write", { path: "src2/a.ts", content: "x" })).allow).toBe(false);
+  });
+
+  it("matches allowlist patterns through symlinked directories", async () => {
+    const cwd = await temp();
+    const real = join(cwd, "real");
+    await mkdir(real, { recursive: true });
+    await symlink(real, join(cwd, "src"));
+    const policy = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: ["src/**"],
+      yolo: false,
+      interactive: false,
+    });
+    expect((await policy.check("write", { path: "src/a.ts", content: "x" })).allow).toBe(true);
+    expect((await policy.check("write", { path: "real/a.ts", content: "x" })).allow).toBe(true);
+  });
+
+  it("refuses .git writes regardless of path casing", async () => {
+    const cwd = await temp();
+    await mkdir(join(cwd, ".git"), { recursive: true });
+    const policy = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: true,
+      interactive: false,
+    });
+    await expect(policy.resolveWrite(".GIT/config")).rejects.toThrow("Refusing to modify .git");
+    await expect(policy.resolveWrite(".Git/HEAD")).rejects.toThrow("Refusing to modify .git");
+  });
+
+  it("confirms extension tools instead of rejecting them as unknown", async () => {
+    const cwd = await temp();
+    const policy = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: false,
+    });
+    expect((await policy.check("my_extension_tool", {})).reason).toContain("Unknown tool");
+    policy.setExtraTools(["my_extension_tool"]);
+    const denied = await policy.check("my_extension_tool", {});
+    expect(denied.allow).toBe(false);
+    expect(denied.reason).toContain("--yolo");
+    policy.setYolo(true);
+    expect((await policy.check("my_extension_tool", {})).allow).toBe(true);
+  });
+
+  it("includes curl headers in the session grant", async () => {
+    const cwd = await temp();
+    const summaries: string[] = [];
+    const policy = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: true,
+      confirm: async (req) => {
+        summaries.push(req.summary);
+        return "session";
+      },
+    });
+    const urls = ["https://example.com"];
+    expect((await policy.check("curl", { urls })).allow).toBe(true);
+    // Same URLs without headers: granted.
+    expect((await policy.check("curl", { urls })).allow).toBe(true);
+    expect(summaries).toHaveLength(1);
+    // Adding headers must re-prompt.
+    expect((await policy.check("curl", { urls, headers: { Authorization: "Bearer x" } })).allow).toBe(true);
+    expect(summaries).toHaveLength(2);
+    expect(summaries[1]).toContain("Authorization");
+  });
 });

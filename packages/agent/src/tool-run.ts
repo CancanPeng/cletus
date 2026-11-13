@@ -15,9 +15,6 @@ export async function runToolCall(
   const tool = tools.find((candidate) => candidate.name === call.name);
   if (!tool) return errorResult(`Unknown tool: ${call.name}`);
 
-  const validation = validateArgs(tool.parameters, call.arguments, call.name);
-  if (!validation.ok) return errorResult(validation.message);
-
   if (hooks?.beforeToolCall) {
     try {
       const decision = await hooks.beforeToolCall(call, call.arguments, ctx.signal);
@@ -30,6 +27,11 @@ export async function runToolCall(
       );
     }
   }
+
+  // Validate only after the permission hook: blocked calls must be denied
+  // and audited even when the model sends malformed arguments.
+  const validation = validateArgs(tool.parameters, call.arguments, call.name);
+  if (!validation.ok) return errorResult(validation.message);
 
   let result: ToolResult;
   try {

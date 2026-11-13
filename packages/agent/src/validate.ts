@@ -13,6 +13,7 @@ type Draft = "2019-09" | "2020-12" | "draft-07";
 
 type Compiler = { compile(schema: unknown): ValidateFunction };
 
+const MAX_CACHE_ENTRIES = 256;
 const cache = new Map<string, ValidateFunction>();
 const compilers = new Map<Draft, Compiler>();
 
@@ -41,9 +42,17 @@ export function validateArgs(
 ): { ok: true } | { ok: false; message: string } {
   const key = JSON.stringify(schema);
   let validate = cache.get(key);
-  if (!validate) {
+  if (validate) {
+    // Refresh recency (Map iterates in insertion order).
+    cache.delete(key);
+    cache.set(key, validate);
+  } else {
     try {
       validate = compilerFor(draftOf(schema)).compile(schema);
+      if (cache.size >= MAX_CACHE_ENTRIES) {
+        const oldest = cache.keys().next().value;
+        if (oldest !== undefined) cache.delete(oldest);
+      }
       cache.set(key, validate);
     } catch (error) {
       return {

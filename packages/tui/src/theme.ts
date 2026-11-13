@@ -203,10 +203,10 @@ export type SymbolConfig = {
 };
 
 export function getTheme(name: string, symbols?: SymbolConfig): Theme {
-  const key = name in THEMES ? (name as Theme["name"]) : "dark";
+  const key = Object.hasOwn(THEMES, name) ? (name as Theme["name"]) : "dark";
   if (key !== name) process.stderr.write(`Warning: unknown theme ${name}; using dark\n`);
   const presetName = symbols?.preset ?? "nerd";
-  const preset = presetName in SYMBOLS ? presetName : "nerd";
+  const preset = Object.hasOwn(SYMBOLS, presetName) ? presetName : "nerd";
   if (preset !== presetName) {
     process.stderr.write(`Warning: unknown symbol preset ${presetName}; using nerd\n`);
   }
@@ -214,7 +214,7 @@ export function getTheme(name: string, symbols?: SymbolConfig): Theme {
     ...SYMBOLS[preset],
   };
   for (const [keyName, value] of Object.entries(symbols?.overrides ?? {})) {
-    if (keyName in resolved && typeof value === "string") {
+    if (Object.hasOwn(resolved, keyName) && typeof value === "string") {
       resolved[keyName as SymbolKey] = value;
     }
   }

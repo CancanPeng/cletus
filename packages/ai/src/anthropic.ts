@@ -1,17 +1,16 @@
 import { AssistantEventStream } from "./event-stream.js";
 import { parseSse } from "./sse.js";
+import { parseRetryAfter, sleep } from "./retry.js";
 import {
   assistantMessage,
   emptyUsage,
   type AssistantContent,
-  type AssistantMessage,
   type LlmContext,
   type Message,
   type Model,
   type StreamOptions,
   type StopReason,
   type ToolCallContent,
-  type Usage,
 } from "./types.js";
 
 type Block =
@@ -26,6 +25,11 @@ type Block =
       toolCall?: ToolCallContent;
     };
 
+function finite(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function toAnthropicMessages(messages: Message[]): Array<Record<string, unknown>> {
   const result: Array<Record<string, unknown>> = [];
   const append = (role: "user" | "assistant", block: Record<string, unknown>): void => {
@@ -38,7 +42,7 @@ function toAnthropicMessages(messages: Message[]): Array<Record<string, unknown>
   };
 
   for (const message of messages) {
-    if (message.role === "user") {
+    if (message.role === "user" || message.role === "system") {
       append("user", { type: "text", text: message.content });
     } else if (message.role === "assistant") {
       for (const block of message.content) {
@@ -69,29 +73,6 @@ function toAnthropicMessages(messages: Message[]): Array<Record<string, unknown>
     }
   }
   return result;
-}
-
-function parseRetryAfter(value: string | null): number {
-  if (!value) return 1000;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds)) return Math.min(seconds * 1000, 30_000);
-  const date = Date.parse(value);
-  if (Number.isFinite(date)) return Math.min(Math.max(0, date - Date.now()), 30_000);
-  return 1000;
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>();
-  const timer = setTimeout(resolve, ms);
-  signal?.addEventListener(
-    "abort",
-    () => {
-      clearTimeout(timer);
-      resolve();
-    },
-    { once: true },
-  );
-  return promise;
 }
 
 export function streamAnthropic(
@@ -132,6 +113,10 @@ export function streamAnthropic(
   };
   if (thinkingBudget > 0) {
     body["thinking"] = { type: "enabled", budget_tokens: thinkingBudget };
+  }
+  // Anthropic requires temperature=1 while thinking is enabled.
+  if (options?.temperature !== undefined && thinkingBudget === 0) {
+    body["temperature"] = options.temperature;
   }
 
   void (async () => {
@@ -182,9 +167,9 @@ export function streamAnthropic(
             const msgUsage = (message as Record<string, unknown>)["usage"];
             if (msgUsage && typeof msgUsage === "object") {
               const u = msgUsage as Record<string, unknown>;
-              usage.input = Number(u["input_tokens"] ?? 0);
-              usage.cacheRead = Number(u["cache_read_input_tokens"] ?? 0);
-              usage.cacheWrite = Number(u["cache_creation_input_tokens"] ?? 0);
+              usage.input = finite(u["input_tokens"], 0);
+              usage.cacheRead = finite(u["cache_read_input_tokens"], 0);
+              usage.cacheWrite = finite(u["cache_creation_input_tokens"], 0);
             }
           }
         } else if (type === "content_block_start") {
@@ -262,16 +247,23 @@ export function streamAnthropic(
           const rawUsage = json["usage"];
           if (rawUsage && typeof rawUsage === "object") {
             const u = rawUsage as Record<string, unknown>;
-            usage.output = Number(u["output_tokens"] ?? usage.output);
-            usage.cacheRead = Number(u["cache_read_input_tokens"] ?? usage.cacheRead);
-            usage.cacheWrite = Number(
-              u["cache_creation_input_tokens"] ?? usage.cacheWrite,
-            );
+            usage.output = finite(u["output_tokens"], usage.output);
+            usage.cacheRead = finite(u["cache_read_input_tokens"], usage.cacheRead);
+            usage.cacheWrite = finite(u["cache_creation_input_tokens"], usage.cacheWrite);
           }
           usage.totalTokens =
             usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
         } else if (type === "message_stop") {
           sawMessageStop = true;
+        } else if (type === "error") {
+          const err = json["error"];
+          const message =
+            err && typeof err === "object"
+              ? (err as Record<string, unknown>)["message"]
+              : undefined;
+          throw new Error(
+            `Provider stream error: ${typeof message === "string" ? message : JSON.stringify(err ?? json)}`,
+          );
         }
       }
 
@@ -292,9 +284,11 @@ export function streamAnthropic(
           content.push(block.toolCall);
         }
       }
-      if (!sawMessageStop && stopReason === "stop" && content.some((c) => c.type === "toolCall")) {
-        stopReason = "toolUse";
+      if (!sawMessageStop) {
+        throw new Error("Provider stream ended without message_stop");
       }
+      usage.totalTokens =
+        usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
       const final = assistantMessage(model, content, stopReason, usage);
       stream.end(final);
     } catch (error) {

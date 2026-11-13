@@ -25,7 +25,7 @@ export function createGrepTool(deps: {
       required: ["pattern"],
       additionalProperties: false,
     },
-    async execute(params): Promise<ToolResult> {
+    async execute(params, ctx): Promise<ToolResult> {
       const pattern = String(params["pattern"] ?? "");
       const input = typeof params["path"] === "string" ? params["path"] : deps.cwd;
       const limit = Math.min(Math.max(Number(params["limit"] ?? 100), 1), 500);
@@ -42,7 +42,12 @@ export function createGrepTool(deps: {
       if (typeof params["glob"] === "string") args.push("--glob", params["glob"]);
       args.push("-e", pattern, path);
       try {
-        const result = await exec("rg", args, { cwd: deps.cwd, maxBuffer: 10 * 1024 * 1024 });
+        const result = await exec("rg", args, {
+          cwd: deps.cwd,
+          maxBuffer: 10 * 1024 * 1024,
+          timeout: 30_000,
+          signal: ctx.signal,
+        });
         const lines = result.stdout.split("\n").filter((line) => line.length > 0).slice(0, limit);
         return {
           content: [{ type: "text", text: lines.length > 0 ? lines.join("\n") : "No matches found" }],

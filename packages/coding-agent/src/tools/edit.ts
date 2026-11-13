@@ -1,4 +1,5 @@
 import { chmod, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { createTwoFilesPatch } from "diff";
 import type { AgentTool, ToolResult } from "@cletus/agent";
@@ -77,6 +78,9 @@ export function createEditTool(deps: { policy: PermissionPolicy }): AgentTool {
             ],
           };
         }
+        // Normalize replacement EOLs to the file's dominant style even when
+        // oldText already matched with explicit \r\n.
+        if (crlf) newText = newText.replace(/\r?\n/g, "\r\n");
         const start = original.indexOf(oldText);
         matches.push({ start, end: start + oldText.length, text: newText });
       }
@@ -99,7 +103,15 @@ export function createEditTool(deps: { policy: PermissionPolicy }): AgentTool {
       }
 
       const info = await stat(path);
-      const temp = join(dirname(path), `.${Date.now()}.${process.pid}.cletus.tmp`);
+      // Detect concurrent external changes between read and write.
+      const current = await readFile(path, "utf8");
+      if (current !== original) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `File changed on disk since it was read: ${path}` }],
+        };
+      }
+      const temp = join(dirname(path), `.${randomUUID()}.cletus.tmp`);
       await writeFile(temp, updated, "utf8");
       await chmod(temp, info.mode);
       await rename(temp, path);

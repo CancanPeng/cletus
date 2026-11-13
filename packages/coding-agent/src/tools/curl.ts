@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
 import type { AgentTool, ToolResult } from "@cletus/agent";
 
@@ -27,15 +28,21 @@ async function fetchOne(
   headers: Record<string, string>,
   signal?: AbortSignal,
 ): Promise<CurlResult> {
+  // Per-call nonce so response bodies cannot spoof the status marker.
+  const marker = `\n__CLETUS_STATUS_${randomBytes(8).toString("hex")}__`;
   const args = [
     "-sS",
     "-L",
+    "--proto-redir",
+    "=http,https",
+    "--max-redirs",
+    "5",
     "--max-time",
     String(timeoutSeconds),
     "--max-filesize",
     "2097152",
     "-w",
-    "\n__CLETUS_STATUS__%{http_code}",
+    `${marker}%{http_code}`,
   ];
   for (const [key, value] of Object.entries(headers)) args.push("-H", `${key}: ${value}`);
   args.push(url);
@@ -47,9 +54,9 @@ async function fetchOne(
       ...(signal ? { signal } : {}),
     });
     const raw = String(result.stdout);
-    const marker = raw.lastIndexOf("\n__CLETUS_STATUS__");
-    const status = marker >= 0 ? Number(raw.slice(marker + 19).trim()) : undefined;
-    const body = marker >= 0 ? raw.slice(0, marker) : raw;
+    const index = raw.lastIndexOf(marker);
+    const status = index >= 0 ? Number(raw.slice(index + marker.length).trim()) : undefined;
+    const body = index >= 0 ? raw.slice(0, index) : raw;
     return {
       url,
       ...(status !== undefined && Number.isFinite(status) ? { status } : {}),
@@ -112,14 +119,22 @@ export function createCurlTool(): AgentTool {
       if (urls.length === 0) {
         return { isError: true, content: [{ type: "text", text: "curl requires urls" }] };
       }
-      const timeoutSeconds = Math.min(
-        Math.max(Number(params["timeout"] ?? 20), 1),
-        120,
-      );
+      const rawTimeout = Number(params["timeout"] ?? 20);
+      const timeoutSeconds = Number.isFinite(rawTimeout)
+        ? Math.min(Math.max(rawTimeout, 1), 120)
+        : 20;
       const headers: Record<string, string> = {};
       if (params["headers"] && typeof params["headers"] === "object") {
         for (const [key, value] of Object.entries(params["headers"])) {
-          if (typeof value === "string") headers[key] = value;
+          if (typeof value !== "string") continue;
+          // curl -H @file reads local files; CRLF enables header injection.
+          if (value.startsWith("@") || /[\r\n]/.test(key) || /[\r\n]/.test(value)) {
+            return {
+              isError: true,
+              content: [{ type: "text", text: `Invalid header: ${key}` }],
+            };
+          }
+          headers[key] = value;
         }
       }
 

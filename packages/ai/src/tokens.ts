@@ -3,9 +3,14 @@ import type { LlmContext, Message } from "./types.js";
 export function estimateTokens(text: string): number {
   let ascii = 0;
   let nonAscii = 0;
-  for (const ch of text) {
-    if (/[\x00-\x7F]/.test(ch)) ascii += 1;
-    else nonAscii += 1;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code < 128) ascii += 1;
+    else if (code >= 0xd800 && code <= 0xdbff && index + 1 < text.length) {
+      // Surrogate pair: one non-ASCII code point.
+      nonAscii += 1;
+      index += 1;
+    } else nonAscii += 1;
   }
   return Math.ceil(ascii / 4 + nonAscii);
 }

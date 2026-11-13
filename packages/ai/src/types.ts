@@ -12,6 +12,10 @@ export type ToolCallContent = {
 export type AssistantContent = TextContent | ThinkingContent | ToolCallContent;
 
 export type Usage = {
+  /**
+   * Input tokens excluding cache reads/writes for Anthropic; OpenAI reports
+   * prompt_tokens including cached tokens, so cacheRead overlaps input there.
+   */
   input: number;
   output: number;
   cacheRead: number;
@@ -89,7 +93,6 @@ export type StreamOptions = {
   maxTokens?: number;
   temperature?: number;
   thinkingLevel?: ThinkingLevel;
-  sessionId?: string;
 };
 
 export function emptyUsage(): Usage {

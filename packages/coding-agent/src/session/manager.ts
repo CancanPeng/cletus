@@ -13,11 +13,22 @@ import type {
 } from "./types.js";
 
 export function encodeCwd(cwd: string): string {
+  // Escape existing dashes first so the mapping stays injective
+  // (/a/b and /a-b must not share a session directory).
+  return cwd.replace(/^[/\\]/, "").replace(/-/g, "--").replace(/[/\\:]/g, "-");
+}
+
+function legacyEncodeCwd(cwd: string): string {
   return cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-");
 }
 
 export function sessionDir(cwd: string, home = process.env["CLETUS_HOME"] ?? join(homedir(), ".cletus")): string {
   return join(home, "sessions", `--${encodeCwd(cwd)}--`);
+}
+
+/** Pre-0.1.1 directory format, kept readable so old sessions stay resumable. */
+function legacySessionDir(cwd: string, home: string): string {
+  return join(home, "sessions", `--${legacyEncodeCwd(cwd)}--`);
 }
 
 function isSessionEntry(value: unknown): value is SessionEntry {
@@ -34,20 +45,17 @@ export class SessionManager {
   private leaf: string | null = null;
   private readonly ids = new Set<string>();
   private appendChain: Promise<void> = Promise.resolve();
-  private readonly header: SessionEntry;
 
   private constructor(
     cwd: string,
     home: string,
     sessionId: string,
     filePath: string | null,
-    header: SessionEntry,
   ) {
     this.cwd = cwd;
     this.home = home;
     this.sessionId = sessionId;
     this.filePath = filePath;
-    this.header = header;
   }
 
   static async create(
@@ -68,7 +76,7 @@ export class SessionManager {
     };
     const filePath = join(dir, `${Date.now()}_${sessionId}.jsonl`);
     await writeFile(filePath, `${JSON.stringify(header)}\n`, "utf8");
-    const manager = new SessionManager(cwd, home, sessionId, filePath, header);
+    const manager = new SessionManager(cwd, home, sessionId, filePath);
     return manager;
   }
 
@@ -106,7 +114,7 @@ export class SessionManager {
       throw new Error("Invalid session file: missing header");
     }
     const home = process.env["CLETUS_HOME"] ?? join(homedir(), ".cletus");
-    const manager = new SessionManager(header.cwd, home, header.id, filePath, header);
+    const manager = new SessionManager(header.cwd, home, header.id, filePath);
     manager.entries = entries;
     manager.leaf = entries[entries.length - 1]?.id ?? null;
     for (const entry of entries) manager.ids.add(entry.id);
@@ -121,29 +129,37 @@ export class SessionManager {
       timestamp: new Date().toISOString(),
       cwd,
     };
-    return new SessionManager(cwd, process.env["CLETUS_HOME"] ?? join(homedir(), ".cletus"), header.id, null, header);
+    return new SessionManager(cwd, process.env["CLETUS_HOME"] ?? join(homedir(), ".cletus"), header.id, null);
   }
 
   static async list(
     cwd: string,
     opts: { home?: string; limit?: number } = {},
   ): Promise<SessionInfo[]> {
-    const dir = sessionDir(cwd, opts.home);
-    let names: string[];
-    try {
-      names = (await readdir(dir)).filter((name) => name.endsWith(".jsonl"));
-    } catch {
-      return [];
+    const home = opts.home ?? process.env["CLETUS_HOME"] ?? join(homedir(), ".cletus");
+    const dirs = [sessionDir(cwd, home)];
+    const legacy = legacySessionDir(cwd, home);
+    if (legacy !== dirs[0]) dirs.push(legacy);
+    const candidates: string[] = [];
+    for (const dir of dirs) {
+      try {
+        for (const name of await readdir(dir)) {
+          if (name.endsWith(".jsonl")) candidates.push(join(dir, name));
+        }
+      } catch {
+        // missing directory
+      }
     }
     const infos: Array<SessionInfo & { mtime: number }> = [];
-    for (const name of names) {
-      const filePath = join(dir, name);
+    for (const filePath of candidates) {
       try {
         const info = await stat(filePath);
         const text = await readFile(filePath, "utf8");
         const lines = text.split("\n").filter((line) => line.trim().length > 0);
         const header = JSON.parse(lines[0] ?? "{}") as Partial<SessionEntry>;
         if (header.type !== "session") continue;
+        // Legacy dirs can mix projects whose paths encode identically.
+        if (header.cwd !== undefined && header.cwd !== cwd) continue;
         let messageCount = 0;
         let firstUserText = "";
         for (const line of lines.slice(1)) {
@@ -159,7 +175,7 @@ export class SessionManager {
           }
         }
         infos.push({
-          id: String(header.id ?? name),
+          id: String(header.id ?? filePath.split("/").pop() ?? filePath),
           filePath,
           cwd: String(header.cwd ?? cwd),
           timestamp: String(header.timestamp ?? info.mtime.toISOString()),
@@ -299,16 +315,26 @@ export class SessionManager {
       ...(this.filePath ? { parentSession: this.filePath } : {}),
     });
     let parentId: string | null = null;
+    const idMap = new Map<string, string>();
+    const clones: SessionEntry[] = [];
     for (const entry of branch) {
       if (entry.type === "session") continue;
       const id = manager.newId();
-      const clone = { ...entry, id, parentId } as SessionEntry;
+      idMap.set(entry.id, id);
+      clones.push({ ...entry, id, parentId } as SessionEntry);
+      parentId = id;
+    }
+    for (const clone of clones) {
+      // Compaction entries reference kept messages by id; remap them or the
+      // fork projects zero kept messages.
+      if (clone.type === "compaction") {
+        clone.firstKeptEntryId = idMap.get(clone.firstKeptEntryId) ?? clone.firstKeptEntryId;
+      }
       if (manager.filePath) {
         await appendFile(manager.filePath, `${JSON.stringify(clone)}\n`, "utf8");
       }
       manager.entries.push(clone);
-      manager.leaf = id;
-      parentId = id;
+      manager.leaf = clone.id;
     }
     return manager;
   }

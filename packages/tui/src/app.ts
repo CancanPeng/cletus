@@ -6,6 +6,8 @@ import {
   createClipboard,
   createHostClipboard,
   createRendererClipboardAdapter,
+  decodePasteBytes,
+  stripAnsiSequences,
   type ClipboardService,
   type Selection,
   ScrollBoxRenderable,
@@ -55,7 +57,7 @@ export type TuiAppOptions = {
 
 export type TranscriptBlock =
   | { id: string; kind: "user"; text: string }
-  | { id: string; kind: "assistant"; text: string; thinking?: string }
+  | { id: string; kind: "assistant"; text: string; thinking?: string; done?: boolean }
   | {
       id: string;
       kind: "tool";
@@ -112,7 +114,20 @@ function formatElapsed(ms: number): string {
 }
 
 function toolPreview(output: string, isError: boolean, arrow: string): string {
-  const line = output.split("\n").map((item) => item.trim()).find((item) => item.length > 0);
+  // Scan lazily: outputs can be megabytes and this runs on every stream tick.
+  let line: string | undefined;
+  let start = 0;
+  while (start < output.length) {
+    const end = output.indexOf("\n", start);
+    const raw = end < 0 ? output.slice(start) : output.slice(start, end);
+    const trimmed = raw.trim();
+    if (trimmed) {
+      line = trimmed;
+      break;
+    }
+    if (end < 0) break;
+    start = end + 1;
+  }
   if (!line) return isError ? `${arrow} error` : `${arrow} …`;
   const clipped = line.length > 118 ? `${line.slice(0, 118)}…` : line;
   return `${arrow} ${clipped}`;
@@ -158,7 +173,6 @@ export class TuiApp {
       }
     | undefined;
   private managerBox: BoxRenderable | undefined;
-  private managerRows: TextRenderable[] = [];
   private syntaxStyle: SyntaxStyle | undefined;
   private theme: Theme;
   private header: string;
@@ -182,11 +196,23 @@ export class TuiApp {
   private readonly views = new Map<string, BlockView>();
   private modal: ModalState | undefined;
   private selectState: SelectState | undefined;
-  private historyIndex = 0;
+  private historyIndex = -1;
+  private historyDraft = "";
   private verbose = false;
   private yolo = false;
   private started = false;
   private stopped = false;
+  private readonly onFocusChange = (current: unknown): void => {
+    if (this.editorBox) {
+      this.editorBox.borderColor =
+        current === this.textarea ? this.color("inputFocus") : this.color("inputBorder");
+    }
+  };
+  private readonly onSelection = (selection: Selection): void => {
+    if (this.stopped) return;
+    const text = selection.getSelectedText();
+    if (text) void this.writeClipboard(text);
+  };
 
   constructor(options: TuiAppOptions) {
     this.options = options;
@@ -198,7 +224,6 @@ export class TuiApp {
 
   async start(): Promise<void> {
     if (this.started) return;
-    this.started = true;
     this.renderer =
       this.options.renderer ??
       (await createCliRenderer({
@@ -209,6 +234,7 @@ export class TuiApp {
         clearOnShutdown: true,
       }));
     this.ownsRenderer = !this.options.renderer;
+    this.started = true;
     this.renderer.setBackgroundColor(this.theme.background);
     this.syntaxStyle = this.createSyntaxStyle();
 
@@ -262,7 +288,20 @@ export class TuiApp {
       cursorColor: this.theme.colors.inputFocus,
       keyBindings: [{ name: "return", shift: true, action: "newline" }],
       onSubmit: () => this.onTextareaSubmit(),
-      onContentChange: () => this.updateCompletion(),
+      onContentChange: () => {
+        // Typing exits history navigation; programmatic setText during
+        // navigation keeps the index (content equals the recalled entry).
+        const value = this.textarea?.plainText ?? "";
+        const recalled =
+          this.historyIndex >= 0
+            ? this.history[this.history.length - 1 - this.historyIndex] ?? ""
+            : this.historyDraft;
+        if (value !== recalled) {
+          this.historyIndex = -1;
+          this.historyDraft = value;
+        }
+        this.updateCompletion();
+      },
     });
     this.editorBox.add(this.textarea);
     this.root.add(this.editorBox);
@@ -308,16 +347,8 @@ export class TuiApp {
     this.root.add(this.footerBox);
     this.updateFooter();
 
-    this.renderer.on(CliRenderEvents.FOCUSED_RENDERABLE, (current: unknown) => {
-      if (this.editorBox) {
-        this.editorBox.borderColor =
-          current === this.textarea ? this.color("inputFocus") : this.color("inputBorder");
-      }
-    });
-    this.renderer.on(CliRenderEvents.SELECTION, (selection: Selection) => {
-      const text = selection.getSelectedText();
-      if (text) void this.writeClipboard(text);
-    });
+    this.renderer.on(CliRenderEvents.FOCUSED_RENDERABLE, this.onFocusChange);
+    this.renderer.on(CliRenderEvents.SELECTION, this.onSelection);
     this.renderer.keyInput.on("keypress", this.handleKey);
     this.textarea.focus();
     this.rebuildBlocks();
@@ -343,11 +374,25 @@ export class TuiApp {
     this.selectState?.resolve(undefined);
     this.selectState = undefined;
     this.renderer?.keyInput.off("keypress", this.handleKey);
-    if (this.ownsRenderer) this.renderer?.destroy();
+    this.renderer?.off(CliRenderEvents.FOCUSED_RENDERABLE, this.onFocusChange);
+    this.renderer?.off(CliRenderEvents.SELECTION, this.onSelection);
+    this.syntaxStyle?.destroy();
+    this.syntaxStyle = undefined;
+    if (this.ownsRenderer) {
+      this.renderer?.destroy();
+    } else {
+      this.root?.destroyRecursively();
+    }
+    this.root = undefined;
     this.options.onExit?.();
   }
 
   appendBlock(block: TranscriptBlock): void {
+    if (this.stopped) return;
+    if (this.blocks.has(block.id)) {
+      this.updateBlock(block.id, block);
+      return;
+    }
     let stored = block;
     if (stored.kind === "tool") {
       if (this.verbose) stored = { ...stored, expanded: true };
@@ -364,6 +409,7 @@ export class TuiApp {
 
   updateBlock(id: string, patch: Partial<TranscriptBlock>): void {
     const current = this.blocks.get(id);
+    if (this.stopped) return;
     if (!current) return;
     const next = { ...current, ...patch } as TranscriptBlock;
     if (next.kind === "tool" && this.verbose) next.expanded = true;
@@ -382,6 +428,7 @@ export class TuiApp {
     duration?: string;
     startedAt?: number | undefined;
   }): void {
+    if (this.stopped) return;
     this.status = {
       ...status,
       startedAt: status.busy
@@ -442,6 +489,7 @@ export class TuiApp {
       this.textarea.cursorColor = theme.colors.inputFocus;
       this.textarea.placeholderColor = theme.colors.inputPlaceholder;
     }
+    this.syntaxStyle?.destroy();
     this.syntaxStyle = this.createSyntaxStyle();
     if (this.scrollbox) {
       for (const view of this.views.values()) view.box.destroyRecursively();
@@ -708,9 +756,13 @@ export class TuiApp {
   }
 
   private updateToolTickerState(): void {
-    const running = [...this.blocks.values()].some(
-      (block) => block.kind === "tool" && this.toolStatus(block) === "running",
-    );
+    let running = false;
+    for (const block of this.blocks.values()) {
+      if (block.kind === "tool" && this.toolStatus(block) === "running") {
+        running = true;
+        break;
+      }
+    }
     if (!running) {
       clearInterval(this.toolTicker);
       this.toolTicker = undefined;
@@ -755,7 +807,7 @@ export class TuiApp {
         fg: this.color("assistant"),
         width: "100%",
         conceal: true,
-        streaming: true,
+        streaming: block.done !== true,
       });
       box.add(thinking);
       box.add(markdown);
@@ -835,6 +887,7 @@ export class TuiApp {
       view.thinking.content = block.thinking ?? "";
       view.thinking.visible = this.showThinking && Boolean(block.thinking);
       view.markdown.content = block.text;
+      if (block.done) view.markdown.streaming = false;
     } else if (view.kind === "tool" && block.kind === "tool") {
       const status = this.toolStatus(block);
       view.title.content = this.toolTitle(block);
@@ -847,7 +900,7 @@ export class TuiApp {
       view.preview.content = toolPreview(block.output, block.isError, this.symbol("preview"));
       view.preview.fg = block.isError ? this.color("error") : this.color("muted");
       view.preview.visible = !block.expanded;
-      view.output.content = block.output;
+      if (block.expanded) view.output.content = block.output;
       view.output.fg = block.isError ? this.color("error") : this.color("fg");
       view.output.visible = block.expanded;
     } else if (view.kind === "notice" && block.kind === "notice") {
@@ -858,6 +911,7 @@ export class TuiApp {
 
   private rebuildBlocks(): void {
     if (!this.scrollbox) return;
+    const follow = this.isAtBottom();
     for (const id of this.order) {
       const block = this.blocks.get(id);
       if (!block) continue;
@@ -865,7 +919,7 @@ export class TuiApp {
       this.views.set(id, view);
       this.scrollbox.add(view.box);
     }
-    this.scrollbox.scrollTo(Infinity);
+    if (follow) this.scrollbox.scrollTo(Infinity);
   }
 
   private handleKey = (key: KeyEvent): void => {
@@ -879,6 +933,19 @@ export class TuiApp {
       }
       return;
     }
+    const bindings = this.options.keybindings;
+    // Abort/exit stay reachable while a modal or the manager is open.
+    if (bindings.matches(key, "abort") || bindings.matches(key, "exit")) {
+      this.intercept(key);
+      if (this.modal) this.finishModal("deny");
+      else if (this.manager) this.closeManager();
+      else if (this.inputModal) this.finishInput(undefined);
+      else if (this.selectState) this.finishSelect(undefined);
+      else if (this.status.busy) this.options.abort();
+      else if (!this.textarea?.plainText) this.stop();
+      else this.textarea.setText("");
+      return;
+    }
     if (this.manager) {
       this.handleManagerKey(key);
       return;
@@ -889,21 +956,6 @@ export class TuiApp {
     }
     if (this.selectState) {
       this.handleSelectKey(key);
-      return;
-    }
-    const bindings = this.options.keybindings;
-    if (bindings.matches(key, "abort")) {
-      this.intercept(key);
-      if (this.status.busy) this.options.abort();
-      else if (!this.textarea?.plainText) this.stop();
-      else this.textarea.setText("");
-      return;
-    }
-    if (bindings.matches(key, "exit")) {
-      if (!this.textarea?.plainText) {
-        this.intercept(key);
-        this.stop();
-      }
       return;
     }
     if (bindings.matches(key, "copy")) {
@@ -966,30 +1018,45 @@ export class TuiApp {
       if (this.completionVisible()) {
         this.intercept(key);
         this.acceptCompletion();
-      } else if (this.completeCommand()) this.intercept(key);
+      }
       return;
     }
     if (bindings.matches(key, "historyPrev")) {
-      if (!this.textarea?.plainText && this.history.length > 0) {
+      if (this.history.length > 0 && this.historyIndex < this.history.length - 1) {
         this.intercept(key);
-        this.historyIndex = Math.min(this.history.length - 1, this.historyIndex + 1);
+        if (this.historyIndex === -1) this.historyDraft = this.textarea?.plainText ?? "";
+        this.historyIndex += 1;
         this.textarea?.setText(this.history[this.history.length - 1 - this.historyIndex] ?? "");
         return;
       }
     }
     if (bindings.matches(key, "historyNext")) {
-      if (!this.textarea?.plainText && this.historyIndex > 0) {
+      if (this.historyIndex >= 0) {
         this.intercept(key);
         this.historyIndex -= 1;
-        this.textarea?.setText(this.history[this.history.length - 1 - this.historyIndex] ?? "");
+        this.textarea?.setText(
+          this.historyIndex === -1
+            ? this.historyDraft
+            : this.history[this.history.length - 1 - this.historyIndex] ?? "",
+        );
         return;
       }
     }
-    if (key.name === "return" && !key.shift && !key.ctrl && !key.meta && !key.option) {
+    if (bindings.matches(key, "newline")) {
+      this.intercept(key);
+      this.textarea?.newLine();
+      return;
+    }
+    if (bindings.matches(key, "followUp")) {
+      this.intercept(key);
+      this.onTextareaSubmit();
+      return;
+    }
+    if (bindings.matches(key, "submit")) {
       if (this.completionVisible()) {
         this.intercept(key);
-        const selected = this.completionItems[this.completionIndex];
-        const exact = selected && this.textarea?.plainText.trim() === `/${selected.name}`;
+        const typed = this.textarea?.plainText.trim() ?? "";
+        const exact = this.completionItems.some((command) => typed === `/${command.name}`);
         if (exact) {
           this.hideCompletion();
           this.submitEditor();
@@ -1024,7 +1091,8 @@ export class TuiApp {
     const text = this.textarea?.plainText.trim() ?? "";
     if (!text) return;
     this.textarea?.setText("");
-    this.historyIndex = 0;
+    this.historyIndex = -1;
+    this.historyDraft = "";
     if (text.startsWith("/")) {
       this.runCommand(text);
       return;
@@ -1134,20 +1202,6 @@ export class TuiApp {
     this.updateFooter();
   }
 
-  private completeCommand(): boolean {
-    const value = this.textarea?.plainText ?? "";
-    if (!value.startsWith("/") || value.includes(" ")) return false;
-    const query = value.slice(1);
-    const matches = this.options.commands
-      .filter((command) => command.name.startsWith(query))
-      .map((command) => command.name);
-    const name = matches[this.completionIndex % Math.max(1, matches.length)];
-    this.completionIndex += 1;
-    if (!name) return false;
-    this.textarea?.setText(`/${name} `);
-    return true;
-  }
-
   private runCommand(text: string): void {
     const body = text.slice(1);
     const space = body.indexOf(" ");
@@ -1239,7 +1293,10 @@ export class TuiApp {
       this.closeManager();
       return;
     }
-    const action = manager.actions.find((candidate) => candidate.key === key.name);
+    const action = manager.actions.find(
+      (candidate) =>
+        candidate.key === key.name && !key.ctrl && !key.meta && !key.option && !key.super,
+    );
     if (action) {
       this.closeManager();
       action.run();
@@ -1273,7 +1330,6 @@ export class TuiApp {
     this.manager = undefined;
     this.managerBox?.destroyRecursively();
     this.managerBox = undefined;
-    this.managerRows = [];
     manager.resolve();
     this.textarea?.focus();
     this.updateFooter();
@@ -1320,7 +1376,6 @@ export class TuiApp {
       }),
     );
     const start = Math.max(0, Math.min(manager.index - 4, manager.items.length - visible));
-    const rows: TextRenderable[] = [];
     for (let rowIndex = 0; rowIndex < visible; rowIndex += 1) {
       const item = manager.items[start + rowIndex];
       if (!item) continue;
@@ -1332,7 +1387,6 @@ export class TuiApp {
         truncate: true,
         width: "100%",
       });
-      rows.push(row);
       box.add(row);
     }
     const actionHint = manager.actions
@@ -1350,13 +1404,12 @@ export class TuiApp {
     );
     this.root.add(box);
     this.managerBox = box;
-    this.managerRows = rows;
     this.updateFooter();
     this.renderer.requestRender();
   }
 
   private getClipboard(): ClipboardService | undefined {
-    if (!this.renderer) return undefined;
+    if (!this.renderer || this.stopped) return undefined;
     if (!this.clipboard) {
       this.clipboard = createClipboard({
         host: createHostClipboard(),
@@ -1409,8 +1462,18 @@ export class TuiApp {
         );
         return;
       }
-      const text = new TextDecoder().decode(result.representation.bytes);
-      if (text) textarea.insertText(text);
+      const text = stripAnsiSequences(decodePasteBytes(result.representation.bytes));
+      if (
+        text &&
+        !this.stopped &&
+        !this.modal &&
+        !this.manager &&
+        !this.inputModal &&
+        !this.selectState &&
+        textarea.focused
+      ) {
+        textarea.insertText(text);
+      }
     } catch (error) {
       this.notify(error instanceof Error ? error.message : String(error), "error");
     }
@@ -1489,6 +1552,17 @@ export class TuiApp {
     this.renderer.requestRender();
   }
 
+  private finishSelect(value: string | undefined): void {
+    const state = this.selectState;
+    if (!state) return;
+    this.selectState = undefined;
+    this.selectBox?.destroyRecursively();
+    this.selectBox = undefined;
+    state.resolve(value);
+    this.textarea?.focus();
+    this.updateFooter();
+  }
+
   private handleSelectKey(key: KeyEvent): void {
     this.intercept(key);
     const state = this.selectState;
@@ -1496,20 +1570,10 @@ export class TuiApp {
     if (key.name === "up") state.index = Math.max(0, state.index - 1);
     else if (key.name === "down") state.index = Math.min(state.items.length - 1, state.index + 1);
     else if (key.name === "return") {
-      this.selectState = undefined;
-      this.selectBox?.destroyRecursively();
-      this.selectBox = undefined;
-      state.resolve(state.items[state.index]?.value);
-      this.textarea?.focus();
-      this.updateFooter();
+      this.finishSelect(state.items[state.index]?.value);
       return;
     } else if (key.name === "escape") {
-      this.selectState = undefined;
-      this.selectBox?.destroyRecursively();
-      this.selectBox = undefined;
-      state.resolve(undefined);
-      this.textarea?.focus();
-      this.updateFooter();
+      this.finishSelect(undefined);
       return;
     }
     this.renderSelect();

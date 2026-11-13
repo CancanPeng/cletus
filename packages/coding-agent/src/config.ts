@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Model } from "@cletus/ai";
@@ -92,9 +92,19 @@ export async function writeJsonAtomic(
 ): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  if (mode !== undefined) await chmod(temp, mode);
-  await rename(temp, path);
+  try {
+    // Create with the final mode so secrets are never world-readable,
+    // even briefly, and clean up the temp file on failure.
+    await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, {
+      encoding: "utf8",
+      ...(mode !== undefined ? { mode } : {}),
+    });
+    if (mode !== undefined) await chmod(temp, mode);
+    await rename(temp, path);
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function loadConfig(home = cletusHome(), path = configPath(home)): Promise<CletusConfig> {
@@ -109,10 +119,20 @@ export async function loadConfig(home = cletusHome(), path = configPath(home)): 
   }
   try {
     const parsed = JSON.parse(text) as CletusConfig;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("config must be a JSON object");
+    }
+    if (parsed.models !== undefined && !Array.isArray(parsed.models)) {
+      throw new Error("config.models must be an array");
+    }
+    const defaults = createDefaultConfig();
     return {
-      ...createDefaultConfig(),
+      ...defaults,
       ...parsed,
-      providers: { ...createDefaultConfig().providers, ...parsed.providers },
+      providers: {
+        openai: { ...defaults.providers.openai, ...parsed.providers?.openai },
+        anthropic: { ...defaults.providers.anthropic, ...parsed.providers?.anthropic },
+      },
       compaction: { ...createDefaultConfig().compaction, ...parsed.compaction },
       webSearch: { ...createDefaultConfig().webSearch, ...parsed.webSearch },
       skillOverrides: { ...createDefaultConfig().skillOverrides, ...parsed.skillOverrides },

@@ -1,9 +1,10 @@
-import { mkdtemp, readFile, rm, writeFile, appendFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentMessage } from "@cletus/agent";
-import { SessionManager } from "../src/session/manager.js";
+import { SessionManager, encodeCwd } from "../src/session/manager.js";
+import { buildProjection } from "../src/session/context.js";
 
 const dirs: string[] = [];
 
@@ -63,5 +64,33 @@ describe("SessionManager", () => {
     const infos = await SessionManager.list(cwd, { home });
     expect(infos).toHaveLength(1);
     expect(infos[0]?.firstUserText).toBe("find me");
+  });
+
+  it("encodes cwds injectively and isolates their sessions", async () => {
+    expect(encodeCwd("/a/b")).not.toBe(encodeCwd("/a-b"));
+    const home = await temp();
+    const first = await SessionManager.create("/a/b", { home });
+    await first.appendMessage(user("project one"));
+    const second = await SessionManager.create("/a-b", { home });
+    await second.appendMessage(user("project two"));
+    const infos = await SessionManager.list("/a/b", { home });
+    expect(infos).toHaveLength(1);
+    expect(infos[0]?.firstUserText).toBe("project one");
+  });
+
+  it("keeps the recent tail when forking a compacted session", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    const manager = await SessionManager.create(cwd, { home });
+    await manager.appendMessage(user("old goal"));
+    const kept = await manager.appendMessage(user("recent question"));
+    await manager.appendCompaction("summary of old goal", kept.id, 100);
+    const fork = await manager.fork();
+    const projection = buildProjection(fork);
+    const texts = projection.messages.map((message) =>
+      message.role === "user" ? message.content : "",
+    );
+    expect(texts.some((text) => text.includes("summary of old goal"))).toBe(true);
+    expect(texts).toContain("recent question");
   });
 });

@@ -22,12 +22,13 @@ export function createTaskTool(deps: {
     onUpdate({ content: [{ type: "text", text: "Waiting for subagent slot..." }] });
     const slot = Promise.withResolvers<void>();
     waiters.push(slot.resolve);
+    // The slot is transferred by release(); active already counts it.
     await slot.promise;
-    active += 1;
   };
   const release = (): void => {
-    active -= 1;
-    waiters.shift()?.();
+    const next = waiters.shift();
+    if (next) next();
+    else active -= 1;
   };
 
   return {

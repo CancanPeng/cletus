@@ -1,4 +1,5 @@
 import { glob } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import type { AgentTool, ToolResult } from "@cletus/agent";
 import type { PermissionPolicy } from "../permissions/policy.js";
 
@@ -24,6 +25,13 @@ export function createFindTool(deps: {
     },
     async execute(params): Promise<ToolResult> {
       const pattern = String(params["pattern"] ?? "");
+      // fs.glob honors absolute heads and .. hops; keep the walk confined.
+      if (isAbsolute(pattern) || pattern.split(/[\\/]/).includes("..")) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Pattern must be relative and stay inside the search path" }],
+        };
+      }
       const input = typeof params["path"] === "string" ? params["path"] : deps.cwd;
       const limit = Math.min(Math.max(Number(params["limit"] ?? 100), 1), 500);
       const searchPath = await deps.policy.resolveRead(input);

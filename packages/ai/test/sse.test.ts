@@ -32,4 +32,28 @@ describe("parseSse", () => {
     }
     expect(events).toEqual([{ data: "[DONE]" }]);
   });
+
+  it("joins multi-line data fields", async () => {
+    const events = [];
+    for await (const event of parseSse(streamOf(["data: line1\ndata: line2\n\n"]))) {
+      events.push(event);
+    }
+    expect(events).toEqual([{ data: "line1\nline2" }]);
+  });
+
+  it("flushes a final event without a trailing blank line", async () => {
+    const events = [];
+    for await (const event of parseSse(streamOf(["data: tail"]))) {
+      events.push(event);
+    }
+    expect(events).toEqual([{ data: "tail" }]);
+  });
+
+  it("handles lone CR line terminators", async () => {
+    const events = [];
+    for await (const event of parseSse(streamOf(["data: one\r\rdata: two\r\r"]))) {
+      events.push(event);
+    }
+    expect(events).toEqual([{ data: "one" }, { data: "two" }]);
+  });
 });

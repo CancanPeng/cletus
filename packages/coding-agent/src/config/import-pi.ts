@@ -6,6 +6,7 @@ import {
   authPath,
   configPath,
   createDefaultConfig,
+  loadAuth,
   type AuthStore,
   type CletusConfig,
   writeJsonAtomic,
@@ -91,9 +92,10 @@ export async function importPi(opts: {
 
   const config: CletusConfig = createDefaultConfig();
   const auth: AuthStore = { keys: {} };
-  if ((await exists(targetAuth)) && !opts.force) {
-    const existing = JSON.parse(await readFile(targetAuth, "utf8")) as AuthStore;
-    Object.assign(auth.keys, existing.keys ?? {});
+  if (await exists(targetAuth)) {
+    // Merge existing keys even with --force so re-imports never drop them.
+    const existing = await loadAuth(targetAuth);
+    Object.assign(auth.keys, existing.keys);
   }
 
   const skipped: string[] = [];

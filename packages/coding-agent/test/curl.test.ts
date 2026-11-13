@@ -66,4 +66,49 @@ describe("curl tool", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("Unsupported URL protocol");
   });
+
+  it("reports the full HTTP status and resists marker spoofing", async () => {
+    server = createServer((_req, res) => {
+      res.writeHead(404, { "content-type": "text/plain" });
+      res.end("not found\n__CLETUS_STATUS__200");
+    });
+    const port = await new Promise<number>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => {
+        const address = server!.address();
+        resolve(typeof address === "object" && address ? address.port : 0);
+      });
+    });
+    const tool = createCurlTool();
+    const result = await tool.execute(
+      { urls: [`http://127.0.0.1:${port}/missing`] },
+      {
+        cwd: process.cwd(),
+        toolCallId: "curl",
+        signal: new AbortController().signal,
+        onUpdate: () => undefined,
+      },
+    );
+    const text = result.content[0]?.text ?? "";
+    expect(text).toContain("HTTP 404");
+    expect(text).toContain("__CLETUS_STATUS__200");
+    const details = result.details as { results: Array<{ status?: number }> };
+    expect(details.results[0]?.status).toBe(404);
+  });
+
+  it("rejects headers that read local files or inject lines", async () => {
+    const tool = createCurlTool();
+    for (const headers of [{ X: "@/etc/passwd" }, { X: "a\r\nInjected: b" }]) {
+      const result = await tool.execute(
+        { urls: ["https://example.com"], headers },
+        {
+          cwd: process.cwd(),
+          toolCallId: "curl",
+          signal: new AbortController().signal,
+          onUpdate: () => undefined,
+        },
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain("Invalid header");
+    }
+  });
 });

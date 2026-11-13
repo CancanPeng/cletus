@@ -113,4 +113,76 @@ describe("streamOpenAI", () => {
     expect(error?.type).toBe("error");
     expect(assistantMessage(model, [], "error").role).toBe("assistant");
   });
+
+  it("emits argument fragments that arrive with the first tool call delta", async () => {
+    process.env["FAKE_KEY"] = "test";
+    const port = await listen((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(
+          'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read","arguments":"{\\"path\\":"}}]},"finish_reason":null}]}\n\n',
+        );
+        res.write(
+          'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"a.txt\\"}"}}]},"finish_reason":null}]}\n\n',
+        );
+        res.write(
+          'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    model.baseUrl = `http://127.0.0.1:${port}/v1`;
+    const events = await collect(streamOpenAI(model, { systemPrompt: "s", messages: [], tools: [] }));
+    const startIndex = events.findIndex((event) => event.type === "toolcall_start");
+    expect(startIndex).toBeGreaterThanOrEqual(0);
+    const deltas = events
+      .slice(startIndex + 1)
+      .filter((event) => event.type === "toolcall_delta")
+      .map((event) => (event.type === "toolcall_delta" ? event.delta : ""))
+      .join("");
+    expect(deltas).toBe('{"path":"a.txt"}');
+  });
+
+  it("fails the stream on a mid-stream error object", async () => {
+    process.env["FAKE_KEY"] = "test";
+    const port = await listen((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(
+          'data: {"choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}\n\n',
+        );
+        res.write('data: {"error":{"message":"server overloaded","type":"server_error"}}\n\n');
+        res.end();
+      });
+    });
+    model.baseUrl = `http://127.0.0.1:${port}/v1`;
+    const events = await collect(streamOpenAI(model, { systemPrompt: "s", messages: [], tools: [] }));
+    expect(events.some((event) => event.type === "done")).toBe(false);
+    const error = events.find((event) => event.type === "error");
+    expect(error?.type).toBe("error");
+    if (error?.type === "error") expect(error.error).toContain("server overloaded");
+  });
+
+  it("fails the stream when no finish reason arrives", async () => {
+    process.env["FAKE_KEY"] = "test";
+    const port = await listen((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(
+          'data: {"choices":[{"index":0,"delta":{"content":"half"},"finish_reason":null}]}\n\n',
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    model.baseUrl = `http://127.0.0.1:${port}/v1`;
+    const events = await collect(streamOpenAI(model, { systemPrompt: "s", messages: [], tools: [] }));
+    const error = events.find((event) => event.type === "error");
+    expect(error?.type).toBe("error");
+    if (error?.type === "error") expect(error.error).toContain("finish reason");
+  });
 });

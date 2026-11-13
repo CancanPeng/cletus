@@ -1,4 +1,4 @@
-import { matchesGlob, resolve } from "node:path";
+import { isAbsolute, matchesGlob, resolve } from "node:path";
 import { realResolve, resolveRead, resolveWrite, type SandboxOptions } from "./sandbox.js";
 
 export type PermissionRequest = {
@@ -27,6 +27,8 @@ export class PermissionPolicy {
   private readonly sessionMcpTools = new Set<string>();
   private readonly sessionSearches = new Set<string>();
   private readonly sessionCurls = new Set<string>();
+  private extraTools = new Set<string>();
+  private readonly sessionExtraTools = new Set<string>();
 
   constructor(opts: {
     cwd: string;
@@ -51,12 +53,18 @@ export class PermissionPolicy {
     this.sandbox.readOnlyRoots = roots;
   }
 
+  /** Register extension tool names so they are confirmed, not rejected. */
+  setExtraTools(names: string[]): void {
+    this.extraTools = new Set(names);
+  }
+
   resetSession(): void {
     this.sessionPaths.clear();
     this.sessionCommands.clear();
     this.sessionMcpTools.clear();
     this.sessionSearches.clear();
     this.sessionCurls.clear();
+    this.sessionExtraTools.clear();
   }
 
   setAllowWrite(patterns: string[]): void {
@@ -77,15 +85,19 @@ export class PermissionPolicy {
 
   private async isWriteAllowed(path: string): Promise<boolean> {
     if (this.sessionPaths.has(path)) return true;
+    const cwd = await realResolve(this.sandbox.cwd);
     for (const pattern of this.allowWrite) {
-      const absolute = pattern.startsWith("/")
-        ? pattern
-        : resolve(this.sandbox.cwd, pattern);
-      try {
-        const resolvedPattern = await realResolve(absolute);
-        if (matchesGlob(path, resolvedPattern)) return true;
-      } catch {
-        if (path.startsWith(absolute)) return true;
+      const absolute = isAbsolute(pattern) ? pattern : resolve(cwd, pattern);
+      if (matchesGlob(path, absolute)) return true;
+      // The pattern may traverse symlinks; resolve its existing prefix so
+      // glob matching sees the same real paths as the sandbox check.
+      const firstGlob = absolute.search(/[*?[]/);
+      if (firstGlob <= 0) continue;
+      const cut = absolute.lastIndexOf("/", firstGlob);
+      const prefix = absolute.slice(0, cut);
+      const resolved = await realResolve(prefix);
+      if (resolved !== prefix && matchesGlob(path, resolved + absolute.slice(cut))) {
+        return true;
       }
     }
     return false;
@@ -95,14 +107,13 @@ export class PermissionPolicy {
     toolName: string,
     args: Record<string, unknown>,
     summary: string,
-    sessionKey: string,
   ): Promise<{ allow: boolean; reason?: string }> {
     if (!this.interactive || !this.confirm) {
       return { allow: false, reason: "Non-interactive mode requires --yolo for write" };
     }
     const decision = await this.confirm({ toolName, args, summary });
     if (decision === "deny") return { allow: false, reason: "Denied by user" };
-    if (decision === "session") this.sessionCommands.add(sessionKey);
+    // Callers record session grants in their own per-tool sets.
     return { allow: true };
   }
 
@@ -138,7 +149,7 @@ export class PermissionPolicy {
           ? `Write ${resolved} (${Buffer.byteLength(String(args["content"] ?? ""))} bytes)`
           : `Edit ${resolved} (${Array.isArray(args["edits"]) ? args["edits"].length : 0} edits)`;
       if (this.sessionPaths.has(resolved)) return { allow: true };
-      const decision = await this.ask(toolName, args, summary, resolved);
+      const decision = await this.ask(toolName, args, summary);
       if (decision.allow) this.sessionPaths.add(resolved);
       return decision;
     }
@@ -147,9 +158,9 @@ export class PermissionPolicy {
       if (this.yolo) return { allow: true };
       if (this.sessionMcpTools.has(toolName)) return { allow: true };
       if (!this.interactive) {
-        return { allow: false, reason: "Non-interactive mode requires --yolo for write" };
+        return { allow: false, reason: "Non-interactive mode requires --yolo for MCP tools" };
       }
-      const decision = await this.ask(toolName, args, `MCP tool ${toolName}`, toolName);
+      const decision = await this.ask(toolName, args, `MCP tool ${toolName}`);
       if (decision.allow) this.sessionMcpTools.add(toolName);
       return decision;
     }
@@ -161,17 +172,25 @@ export class PermissionPolicy {
       const urls = Array.isArray(args["urls"])
         ? args["urls"].map(String).join(" ")
         : "";
-      if (this.sessionCurls.has(urls)) return { allow: true };
+      // Headers change the request's effect, so they are part of the grant.
+      const headerKeys =
+        args["headers"] && typeof args["headers"] === "object"
+          ? Object.entries(args["headers"] as Record<string, unknown>)
+              .map(([key, value]) => `${key}: ${String(value)}`)
+              .sort()
+              .join("\n")
+          : "";
+      const requestKey = headerKeys ? `${urls}\n${headerKeys}` : urls;
+      if (this.sessionCurls.has(requestKey)) return { allow: true };
       if (!this.interactive) {
         return { allow: false, reason: "Non-interactive mode requires --yolo for curl" };
       }
       const decision = await this.ask(
         toolName,
         args,
-        `curl: ${urls}`,
-        urls,
+        headerKeys ? `curl: ${urls}\n${headerKeys}` : `curl: ${urls}`,
       );
-      if (decision.allow) this.sessionCurls.add(urls);
+      if (decision.allow) this.sessionCurls.add(requestKey);
       return decision;
     }
 
@@ -182,12 +201,7 @@ export class PermissionPolicy {
       if (!this.interactive) {
         return { allow: false, reason: "Non-interactive mode requires --yolo for web search" };
       }
-      const decision = await this.ask(
-        toolName,
-        args,
-        `Web search: ${query}`,
-        query,
-      );
+      const decision = await this.ask(toolName, args, `Web search: ${query}`);
       if (decision.allow) this.sessionSearches.add(query);
       return decision;
     }
@@ -197,10 +211,21 @@ export class PermissionPolicy {
       const command = String(args["command"] ?? "");
       if (this.sessionCommands.has(command)) return { allow: true };
       if (!this.interactive) {
-        return { allow: false, reason: "Non-interactive mode requires --yolo for write" };
+        return { allow: false, reason: "Non-interactive mode requires --yolo for bash" };
       }
-      const decision = await this.ask(toolName, args, command, command);
+      const decision = await this.ask(toolName, args, command);
       if (decision.allow) this.sessionCommands.add(command);
+      return decision;
+    }
+
+    if (this.extraTools.has(toolName)) {
+      if (this.yolo) return { allow: true };
+      if (this.sessionExtraTools.has(toolName)) return { allow: true };
+      if (!this.interactive) {
+        return { allow: false, reason: "Non-interactive mode requires --yolo for extension tools" };
+      }
+      const decision = await this.ask(toolName, args, `Extension tool ${toolName}`);
+      if (decision.allow) this.sessionExtraTools.add(toolName);
       return decision;
     }
 

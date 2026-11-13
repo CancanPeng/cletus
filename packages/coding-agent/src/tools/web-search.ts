@@ -69,12 +69,18 @@ export function createWebSearchTool(deps: {
         );
         const constraints = parseQueryConstraints(query);
         const filtered = filterSources(response.sources, constraints);
+        // Relax include constraints when they filter everything out, but
+        // never re-admit hosts the user explicitly excluded with -site:.
         const relaxed =
           filtered.length === 0 &&
-          (constraints.includeSites.length > 0 ||
-            constraints.excludeSites.length > 0 ||
-            constraints.includeFileTypes.length > 0);
-        const sources = relaxed ? response.sources : filtered;
+          (constraints.includeSites.length > 0 || constraints.includeFileTypes.length > 0);
+        const sources = relaxed
+          ? filterSources(response.sources, {
+              includeSites: [],
+              excludeSites: constraints.excludeSites,
+              includeFileTypes: [],
+            })
+          : filtered;
         const text = formatSearchResponse({ ...response, sources });
         return {
           content: [

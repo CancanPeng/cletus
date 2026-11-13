@@ -1,5 +1,6 @@
 import { AssistantEventStream } from "./event-stream.js";
 import { parseSse } from "./sse.js";
+import { parseRetryAfter, sleep } from "./retry.js";
 import {
   assistantMessage,
   emptyUsage,
@@ -19,6 +20,8 @@ type OpenAIToolCall = {
   name: string;
   args: string;
   started: boolean;
+  /** Argument text received before toolcall_start; flushed when it starts. */
+  pending: string;
 };
 
 function apiKeyFor(model: Model, options?: StreamOptions): string {
@@ -41,43 +44,19 @@ function toOpenAIMessage(message: Message): Record<string, unknown> {
       }));
     return {
       role: "assistant",
-      content: text.length > 0 ? text : null,
+      // null content is only valid alongside tool_calls.
+      content: text.length > 0 ? text : toolCalls.length > 0 ? null : "",
       ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
     };
   }
-  if (message.role !== "toolResult") {
-    return { role: "user", content: message.content };
+  if (message.role === "system") {
+    return { role: "system", content: message.content };
   }
   return {
     role: "tool",
     tool_call_id: message.toolCallId,
     content: message.content.map((b) => b.text).join(""),
   };
-}
-
-function parseRetryAfter(value: string | null): number {
-  if (!value) return 1000;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds)) return Math.min(seconds * 1000, 30_000);
-  const date = Date.parse(value);
-  if (Number.isFinite(date)) {
-    return Math.min(Math.max(0, date - Date.now()), 30_000);
-  }
-  return 1000;
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>();
-  const timer = setTimeout(resolve, ms);
-  signal?.addEventListener(
-    "abort",
-    () => {
-      clearTimeout(timer);
-      resolve();
-    },
-    { once: true },
-  );
-  return promise;
 }
 
 function mergeUsage(target: Usage, raw: Record<string, unknown>): void {
@@ -172,6 +151,13 @@ export function streamOpenAI(
         } catch {
           continue;
         }
+        const streamError = json["error"];
+        if (streamError && typeof streamError === "object") {
+          const message = (streamError as Record<string, unknown>)["message"];
+          throw new Error(
+            `Provider stream error: ${typeof message === "string" ? message : JSON.stringify(streamError)}`,
+          );
+        }
         const rawUsage = json["usage"];
         if (rawUsage && typeof rawUsage === "object") {
           mergeUsage(usage, rawUsage as Record<string, unknown>);
@@ -200,7 +186,7 @@ export function streamOpenAI(
               const index = Number(call["index"] ?? 0);
               let entry = calls.get(index);
               if (!entry) {
-                entry = { name: "", args: "", started: false };
+                entry = { name: "", args: "", started: false, pending: "" };
                 calls.set(index, entry);
               }
               const id = call["id"];
@@ -213,6 +199,8 @@ export function streamOpenAI(
                   entry.args += f["arguments"];
                   if (entry.started) {
                     stream.push({ type: "toolcall_delta", index, delta: f["arguments"] });
+                  } else {
+                    entry.pending += f["arguments"];
                   }
                 }
               }
@@ -224,6 +212,10 @@ export function streamOpenAI(
                   id: entry.id,
                   name: entry.name,
                 });
+                if (entry.pending) {
+                  stream.push({ type: "toolcall_delta", index, delta: entry.pending });
+                  entry.pending = "";
+                }
               }
             }
           }
@@ -261,6 +253,9 @@ export function streamOpenAI(
         content.push(toolCall);
       }
 
+      if (finishReason === undefined) {
+        throw new Error("Provider stream ended without a finish reason");
+      }
       const stopReason: StopReason =
         finishReason === "length"
           ? "length"

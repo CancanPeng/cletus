@@ -18,19 +18,24 @@ export class ResourceLoader {
     private readonly cwd: string,
     private readonly home: string,
     private skillOverrides: Record<string, SkillVisibility> = {},
+    private trustProject = false,
   ) {}
 
   async load(): Promise<LoadedResources> {
+    // Scanning skill roots walks the filesystem; reuse the last result until
+    // reload()/setSkillOverrides() invalidates it (every LLM turn calls load).
+    if (this.loaded) return this.loaded;
     const [contextFiles, skillResult, prompts] = await Promise.all([
       loadContextFiles(this.cwd, this.home),
-      loadSkills(this.cwd, this.home, this.skillOverrides),
-      loadPrompts(this.cwd, this.home),
+      loadSkills(this.cwd, this.home, this.skillOverrides, this.trustProject),
+      loadPrompts(this.cwd, this.home, this.trustProject),
     ]);
     const roots = [
       join(this.home, "skills"),
       join(this.home, "prompts"),
-      join(this.cwd, ".cletus", "skills"),
-      join(this.cwd, ".cletus", "prompts"),
+      ...(this.trustProject
+        ? [join(this.cwd, ".cletus", "skills"), join(this.cwd, ".cletus", "prompts")]
+        : []),
       ...skillResult.roots,
     ];
     const result: LoadedResources = {

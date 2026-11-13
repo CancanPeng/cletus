@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 export type SandboxOptions = {
   cwd: string;
@@ -50,12 +50,9 @@ export async function resolveWrite(
     throw new Error(`Path outside allowed roots: ${target}`);
   }
   const rel = relative(cwd, target);
-  if (rel.split(/[\\/]/).some((part) => part === ".git")) {
+  // Case-insensitive filesystems (macOS/Windows) resolve .GIT to .git.
+  if (rel.split(/[\\/]/).some((part) => part.toLowerCase() === ".git")) {
     throw new Error("Refusing to modify .git");
   }
   return target;
-}
-
-export function resolveForGlob(cwd: string, pattern: string): string {
-  return isAbsolute(pattern) ? pattern : resolve(cwd, pattern);
 }
