@@ -180,5 +180,7 @@ export function resolveModel(
   if (source.apiKeyId !== undefined) model.apiKeyId = source.apiKeyId;
   if (source.supportsThinking !== undefined) model.supportsThinking = source.supportsThinking;
   if (source.thinkingLevel !== undefined) model.thinkingLevel = source.thinkingLevel;
+  if (source.webSearch !== undefined) model.webSearch = source.webSearch;
+  if (source.webSearchMaxUses !== undefined) model.webSearchMaxUses = source.webSearchMaxUses;
   return model;
 }

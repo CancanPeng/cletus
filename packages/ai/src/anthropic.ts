@@ -12,6 +12,7 @@ import {
   type StopReason,
   type ToolCallContent,
   type Usage,
+  type WebSearchResultItem,
 } from "./types.js";
 
 type Block =
@@ -24,6 +25,21 @@ type Block =
       name: string;
       args: string;
       toolCall?: ToolCallContent;
+    }
+  | {
+      kind: "serverToolUse";
+      index: number;
+      id: string;
+      name: string;
+      args: string;
+      input?: Record<string, unknown>;
+    }
+  | {
+      kind: "webSearchResult";
+      index: number;
+      toolUseId: string;
+      results: WebSearchResultItem[];
+      errorCode?: string;
     };
 
 function toAnthropicMessages(messages: Message[]): Array<Record<string, unknown>> {
@@ -56,6 +72,36 @@ function toAnthropicMessages(messages: Message[]): Array<Record<string, unknown>
             id: block.id,
             name: block.name,
             input: block.arguments,
+          });
+        } else if (block.type === "serverToolUse") {
+          append("assistant", {
+            type: "server_tool_use",
+            id: block.id,
+            name: block.name,
+            input: block.input,
+          });
+        } else if (block.type === "webSearchResult") {
+          const content = block.results.length > 0
+            ? block.results.map((item) => {
+                const result: Record<string, unknown> = {
+                  type: "web_search_result",
+                };
+                if (item.title !== undefined) result["title"] = item.title;
+                if (item.url !== undefined) result["url"] = item.url;
+                if (item.pageAge !== undefined) result["page_age"] = item.pageAge;
+                if (item.encryptedContent !== undefined) {
+                  result["encrypted_content"] = item.encryptedContent;
+                }
+                return result;
+              })
+            : {
+                type: "web_search_tool_result_error",
+                error_code: block.errorCode ?? "unavailable",
+              };
+          append("assistant", {
+            type: "web_search_tool_result",
+            tool_use_id: block.toolUseId,
+            content,
           });
         }
       }
@@ -118,16 +164,25 @@ export function streamAnthropic(
     else maxTokens = Math.max(maxTokens, thinkingBudget + 1024);
   }
 
+  const tools: Array<Record<string, unknown>> = context.tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.parameters,
+  }));
+  if (model.webSearch) {
+    tools.push({
+      type: "web_search_20250305",
+      name: "web_search",
+      max_uses: model.webSearchMaxUses ?? 5,
+    });
+  }
+
   const body: Record<string, unknown> = {
     model: model.id,
     max_tokens: maxTokens,
     system: context.systemPrompt,
     messages: toAnthropicMessages(context.messages),
-    tools: context.tools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      input_schema: tool.parameters,
-    })),
+    tools,
     stream: true,
   };
   if (thinkingBudget > 0) {
@@ -207,6 +262,50 @@ export function streamAnthropic(
             const name = String(b["name"] ?? "unknown");
             blocks.push({ kind: "toolCall", index, id, name, args: "" });
             stream.push({ type: "toolcall_start", index, id, name });
+          } else if (blockType === "server_tool_use") {
+            const input = b["input"];
+            blocks.push({
+              kind: "serverToolUse",
+              index,
+              id: String(b["id"] ?? `server_${index}`),
+              name: String(b["name"] ?? "web_search"),
+              args:
+                input && typeof input === "object" ? JSON.stringify(input) : "",
+            });
+          } else if (blockType === "web_search_tool_result") {
+            const results: WebSearchResultItem[] = [];
+            let errorCode: string | undefined;
+            const content = b["content"];
+            if (Array.isArray(content)) {
+              for (const item of content) {
+                if (!item || typeof item !== "object") continue;
+                if (!("type" in item) || item.type !== "web_search_result") continue;
+                const result: WebSearchResultItem = {};
+                if ("title" in item && typeof item.title === "string") result.title = item.title;
+                if ("url" in item && typeof item.url === "string") result.url = item.url;
+                if ("page_age" in item) {
+                  result.pageAge =
+                    typeof item.page_age === "string" || item.page_age === null
+                      ? item.page_age
+                      : null;
+                }
+                if ("encrypted_content" in item && typeof item.encrypted_content === "string") {
+                  result.encryptedContent = item.encrypted_content;
+                }
+                results.push(result);
+              }
+            } else if (content && typeof content === "object" && "type" in content) {
+              if (content.type === "web_search_tool_result_error" && "error_code" in content) {
+                errorCode = typeof content.error_code === "string" ? content.error_code : "unavailable";
+              }
+            }
+            blocks.push({
+              kind: "webSearchResult",
+              index,
+              toolUseId: String(b["tool_use_id"] ?? ""),
+              results,
+              ...(errorCode ? { errorCode } : {}),
+            });
           }
         } else if (type === "content_block_delta") {
           const index = Number(json["index"] ?? 0);
@@ -228,8 +327,12 @@ export function streamAnthropic(
             if (block?.kind === "thinking") block.signature += signature;
           } else if (deltaType === "input_json_delta") {
             const partialJson = String(d["partial_json"] ?? "");
-            if (block?.kind === "toolCall") block.args += partialJson;
-            if (partialJson) stream.push({ type: "toolcall_delta", index, delta: partialJson });
+            if (block?.kind === "toolCall" || block?.kind === "serverToolUse") {
+              block.args += partialJson;
+            }
+            if (partialJson && block?.kind === "toolCall") {
+              stream.push({ type: "toolcall_delta", index, delta: partialJson });
+            }
           }
         } else if (type === "content_block_stop") {
           const index = Number(json["index"] ?? 0);
@@ -249,6 +352,15 @@ export function streamAnthropic(
               arguments: args,
             };
             stream.push({ type: "toolcall_end", index, toolCall: block.toolCall });
+          } else if (block?.kind === "serverToolUse") {
+            let input: Record<string, unknown> = {};
+            try {
+              const parsed = JSON.parse(block.args || "{}");
+              input = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+            } catch {
+              input = { __raw: block.args };
+            }
+            block.input = input;
           }
         } else if (type === "message_delta") {
           const delta = json["delta"];
@@ -288,8 +400,24 @@ export function streamAnthropic(
             if (block.signature) thinking.signature = block.signature;
             content.push(thinking);
           }
-        } else if (block.toolCall) {
+        } else if (block.kind === "toolCall" && block.toolCall) {
           content.push(block.toolCall);
+        } else if (block.kind === "serverToolUse") {
+          content.push({
+            type: "serverToolUse",
+            id: block.id,
+            name: block.name,
+            input: block.input ?? {},
+          });
+        } else if (block.kind === "webSearchResult") {
+          const result = {
+            type: "webSearchResult" as const,
+            toolUseId: block.toolUseId,
+            results: block.results,
+          };
+          content.push(
+            block.errorCode ? { ...result, errorCode: block.errorCode } : result,
+          );
         }
       }
       if (!sawMessageStop && stopReason === "stop" && content.some((c) => c.type === "toolCall")) {
@@ -310,6 +438,22 @@ export function streamAnthropic(
       for (const block of blocks) {
         if (block.kind === "text" && block.text) content.push({ type: "text", text: block.text });
         if (block.kind === "toolCall" && block.toolCall) content.push(block.toolCall);
+        if (block.kind === "serverToolUse") {
+          content.push({
+            type: "serverToolUse",
+            id: block.id,
+            name: block.name,
+            input: block.input ?? {},
+          });
+        }
+        if (block.kind === "webSearchResult") {
+          content.push({
+            type: "webSearchResult",
+            toolUseId: block.toolUseId,
+            results: block.results,
+            ...(block.errorCode ? { errorCode: block.errorCode } : {}),
+          });
+        }
       }
       const final = assistantMessage(
         model,

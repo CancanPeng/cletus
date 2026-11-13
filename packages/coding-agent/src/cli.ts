@@ -47,6 +47,7 @@ const BUILTIN_COMMANDS = [
   "skills",
   "permissions",
   "yolo",
+  "websearch",
   "mcp",
   "reload",
 ];
@@ -601,6 +602,38 @@ async function runTui(opts: {
             ? "YOLO enabled: write and command confirmations are bypassed"
             : "YOLO disabled: confirmations restored",
           enabled ? "warn" : "info",
+        );
+      },
+    },
+    {
+      name: "websearch",
+      description: "Toggle native Anthropic web search",
+      run: async (args) => {
+        if (!session) return;
+        if (session.model.provider !== "anthropic") {
+          app?.notify("Native web search is only wired for Anthropic Messages", "warn");
+          return;
+        }
+        const value = args.trim().toLowerCase();
+        if (value && !["on", "off", "true", "false", "1", "0", "yes", "no"].includes(value)) {
+          app?.notify("Usage: /websearch [on|off]", "warn");
+          return;
+        }
+        const enabled = value
+          ? ["on", "true", "1", "yes"].includes(value)
+          : !session.model.webSearch;
+        session.model.webSearch = enabled;
+        const ref = session.model.ref ?? `${session.model.provider}/${session.model.id}`;
+        const entry = opts.config.models.find(
+          (candidate) => (candidate.ref ?? `${candidate.provider}/${candidate.id}`) === ref,
+        );
+        if (entry) entry.webSearch = enabled;
+        await writeJsonAtomic(configPath(opts.home), opts.config);
+        session.agent.setModel(session.model);
+        app?.notify(
+          enabled
+            ? "Native web search enabled for this model"
+            : "Native web search disabled for this model",
         );
       },
     },
