@@ -36,7 +36,7 @@ export function createCoreTools(deps: CoreToolDeps): AgentTool[] {
     createGrepTool({ policy: deps.policy, cwd: deps.cwd }),
     createFindTool({ policy: deps.policy, cwd: deps.cwd }),
     createLsTool({ policy: deps.policy, cwd: deps.cwd }),
-    ...(deps.webSearch.enabled && !deps.model.webSearch
+    ...(deps.webSearch.enabled
       ? [createWebSearchTool({ config: deps.webSearch })]
       : []),
   ];

@@ -9,30 +9,7 @@ export type ToolCallContent = {
   name: string;
   arguments: Record<string, unknown>;
 };
-export type ServerToolUseContent = {
-  type: "serverToolUse";
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-};
-export type WebSearchResultItem = {
-  title?: string;
-  url?: string;
-  pageAge?: string | null;
-  encryptedContent?: string;
-};
-export type WebSearchResultContent = {
-  type: "webSearchResult";
-  toolUseId: string;
-  results: WebSearchResultItem[];
-  errorCode?: string;
-};
-export type AssistantContent =
-  | TextContent
-  | ThinkingContent
-  | ToolCallContent
-  | ServerToolUseContent
-  | WebSearchResultContent;
+export type AssistantContent = TextContent | ThinkingContent | ToolCallContent;
 
 export type Usage = {
   input: number;
@@ -94,9 +71,6 @@ export type Model = {
   maxOutputTokens: number;
   supportsThinking?: boolean;
   thinkingLevel?: ThinkingLevel;
-  /** Enable provider-hosted web search (Anthropic Messages `web_search` server tool). */
-  webSearch?: boolean;
-  webSearchMaxUses?: number;
 };
 
 export type AssistantStreamEvent =

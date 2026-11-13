@@ -79,7 +79,7 @@ Keybinding changes apply on the next launch. `/theme` switches and persists imme
 
 Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a command. `Enter` on a complete command such as `/quit` runs it immediately.
 
-`/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/keys`, `/skills`, `/permissions`, `/yolo`, `/websearch`, `/mcp`, `/reload`, `/skill:<name>`, plus prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
+`/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/keys`, `/skills`, `/permissions`, `/yolo`, `/mcp`, `/reload`, `/skill:<name>`, plus prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
 
 ## Skills
 
@@ -118,24 +118,7 @@ Configure in `~/.cletus/config.json`:
 }
 ```
 
-The tool supports `site:`, `-site:`, `filetype:` constraints and `recency` filters, returns titles/URLs/snippets, and requires confirmation unless `--yolo` is active. If the model has native Anthropic `webSearch` enabled, the client tool is omitted to avoid duplicate `web_search` declarations.
-
-## Native web search
-
-For Anthropic Messages models, cletus can declare Anthropic's hosted `web_search` tool:
-
-```json
-{
-  "provider": "anthropic",
-  "id": "claude-sonnet-4-5",
-  "webSearch": true,
-  "webSearchMaxUses": 5
-}
-```
-
-In the TUI, `/websearch on` / `/websearch off` toggles it for the current model and persists the flag. The model executes searches server-side; citations appear in its answer. This bypasses cletus's client-side `PermissionPolicy` because the provider performs the network request.
-
-OpenAI Chat Completions does not expose a hosted web-search tool; use an MCP server or a client-side tool there.
+The tool supports `site:`, `-site:`, `filetype:` constraints and `recency` filters, returns titles/URLs/snippets, and requires confirmation unless `--yolo` is active.
 
 ## Project resources
 

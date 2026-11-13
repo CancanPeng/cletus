@@ -75,17 +75,13 @@ function serializeMessage(entry: SessionEntry): string {
   if (message.role === "user") return `## User\n${message.content}\n`;
   if (message.role === "assistant") {
     const text = message.content
-      .map((block: AssistantContent) => {
-        if (block.type === "text") return block.text;
-        if (block.type === "thinking") return `[thinking] ${block.thinking}`;
-        if (block.type === "toolCall") {
-          return `[tool ${block.name}] ${JSON.stringify(block.arguments)}`;
-        }
-        if (block.type === "serverToolUse") {
-          return `[web_search] ${JSON.stringify(block.input)}`;
-        }
-        return `[web_search results] ${JSON.stringify(block.results)}`;
-      })
+      .map((block: AssistantContent) =>
+        block.type === "text"
+          ? block.text
+          : block.type === "thinking"
+            ? `[thinking] ${block.thinking}`
+            : `[tool ${block.name}] ${JSON.stringify(block.arguments)}`,
+      )
       .join("\n");
     return `## Assistant\n${text}\n`;
   }

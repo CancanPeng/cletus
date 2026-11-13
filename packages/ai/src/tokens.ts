@@ -18,13 +18,7 @@ export function estimateMessageTokens(message: Message): number {
     for (const block of message.content) {
       if (block.type === "text") total += estimateTokens(block.text);
       else if (block.type === "thinking") total += estimateTokens(block.thinking);
-      else if (block.type === "toolCall") {
-        total += estimateTokens(block.name + JSON.stringify(block.arguments));
-      } else if (block.type === "serverToolUse") {
-        total += estimateTokens(block.name + JSON.stringify(block.input));
-      } else {
-        total += estimateTokens(JSON.stringify(block.results));
-      }
+      else total += estimateTokens(block.name + JSON.stringify(block.arguments));
     }
   } else {
     for (const block of message.content) total += estimateTokens(block.text);

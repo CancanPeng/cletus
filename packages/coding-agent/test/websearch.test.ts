@@ -77,7 +77,7 @@ describe("web search", () => {
     ).toEqual(["ok"]);
   });
 
-  it("registers only one web_search surface", async () => {
+  it("registers the web_search tool", async () => {
     const policy = new PermissionPolicy({
       cwd: process.cwd(),
       readOnlyRoots: [],
@@ -101,15 +101,6 @@ describe("web search", () => {
       webSearch: config,
     });
     expect(client.some((tool) => tool.name === "web_search")).toBe(true);
-    const native = createCoreTools({
-      cwd: process.cwd(),
-      policy,
-      home: process.cwd(),
-      model: { ...base, webSearch: true },
-      sessionId: "1",
-      webSearch: config,
-    });
-    expect(native.some((tool) => tool.name === "web_search")).toBe(false);
   });
 
   it("returns a formatted tool result", async () => {
