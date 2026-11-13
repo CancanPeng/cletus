@@ -158,7 +158,7 @@ export class TuiApp {
   private modal: ModalState | undefined;
   private selectState: SelectState | undefined;
   private historyIndex = 0;
-  private expandedAll = false;
+  private verbose = false;
   private yolo = false;
   private started = false;
   private stopped = false;
@@ -314,16 +314,19 @@ export class TuiApp {
   }
 
   appendBlock(block: TranscriptBlock): void {
-    this.blocks.set(block.id, block);
-    this.order.push(block.id);
-    const follow = block.kind === "user" || this.isAtBottom();
-    this.addView(block, follow);
+    const stored =
+      block.kind === "tool" && this.verbose ? { ...block, expanded: true } : block;
+    this.blocks.set(stored.id, stored);
+    this.order.push(stored.id);
+    const follow = stored.kind === "user" || this.isAtBottom();
+    this.addView(stored, follow);
   }
 
   updateBlock(id: string, patch: Partial<TranscriptBlock>): void {
     const current = this.blocks.get(id);
     if (!current) return;
     const next = { ...current, ...patch } as TranscriptBlock;
+    if (next.kind === "tool" && this.verbose) next.expanded = true;
     this.blocks.set(id, next);
     this.updateView(next);
   }
@@ -501,6 +504,21 @@ export class TuiApp {
   setYolo(enabled: boolean): void {
     this.yolo = enabled;
     this.updateFooter();
+  }
+
+  setVerbose(enabled: boolean): void {
+    this.verbose = enabled;
+    for (const [id, block] of this.blocks) {
+      if (block.kind !== "tool") continue;
+      const next = { ...block, expanded: enabled };
+      this.blocks.set(id, next);
+      this.updateView(next);
+    }
+    this.updateFooter();
+  }
+
+  isVerbose(): boolean {
+    return this.verbose;
   }
 
   notify(text: string, level: "info" | "warn" | "error" = "info"): void {
@@ -1038,13 +1056,7 @@ export class TuiApp {
   }
 
   private toggleToolOutput(): void {
-    this.expandedAll = !this.expandedAll;
-    for (const [id, block] of this.blocks) {
-      if (block.kind !== "tool") continue;
-      const next = { ...block, expanded: this.expandedAll };
-      this.blocks.set(id, next);
-      this.updateView(next);
-    }
+    this.setVerbose(!this.verbose);
   }
 
   private footerLeftContent(): string {
@@ -1066,7 +1078,7 @@ export class TuiApp {
       ].filter(Boolean).join(" · ");
       return `${SPINNER[this.spinner] ?? "⠋"} ${activity}${suffix ? ` · ${suffix}` : ""}`;
     }
-    return `${this.symbol("ready")}${usage ? ` · ${usage}` : ""}${this.status.duration ? ` · ${this.symbol("duration")} ${this.status.duration}` : ""}${this.yolo ? ` · ${this.symbol("yolo")} YOLO` : ""}`;
+    return `${this.symbol("ready")}${usage ? ` · ${usage}` : ""}${this.status.duration ? ` · ${this.symbol("duration")} ${this.status.duration}` : ""}${this.verbose ? " · verbose" : ""}${this.yolo ? ` · ${this.symbol("yolo")} YOLO` : ""}`;
   }
 
   private footerRightContent(): string {

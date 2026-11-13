@@ -304,6 +304,32 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("expands tool output in verbose mode", async () => {
+    const ctx = await setupApp();
+    ctx.app.appendBlock({
+      id: "verbose-tool",
+      kind: "tool",
+      name: "bash",
+      argsSummary: "npm test",
+      output: "line one\nline two",
+      isError: false,
+      expanded: false,
+    });
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).not.toContain("line two");
+    ctx.app.setVerbose(true);
+    await ctx.flush();
+    let frame = ctx.captureCharFrame();
+    expect(frame).toContain("line two");
+    expect(frame).toContain("verbose");
+    ctx.app.setVerbose(false);
+    await ctx.flush();
+    frame = ctx.captureCharFrame();
+    expect(frame).not.toContain("line two");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("renders assistant markdown and tool cards", async () => {
     const ctx = await setupApp();
     ctx.app.appendBlock({

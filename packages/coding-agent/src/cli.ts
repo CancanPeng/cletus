@@ -705,6 +705,24 @@ async function runTui(opts: {
       },
     },
     {
+      name: "verbose",
+      description: "Show full tool output",
+      run: (args) => {
+        const value = args.trim().toLowerCase();
+        if (value && !["on", "off", "true", "false", "1", "0", "yes", "no"].includes(value)) {
+          app?.notify("Usage: /verbose [on|off]", "warn");
+          return;
+        }
+        const enabled = value
+          ? ["on", "true", "1", "yes"].includes(value)
+          : !(app?.isVerbose() ?? false);
+        app?.setVerbose(enabled);
+        app?.notify(
+          enabled ? "Tool output: verbose" : "Tool output: preview",
+        );
+      },
+    },
+    {
       name: "mcp",
       description: "Show MCP server status",
       run: () => {
