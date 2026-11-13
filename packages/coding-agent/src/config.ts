@@ -11,6 +11,8 @@ export class ConfigError extends Error {
 }
 
 export type CompactionConfig = { reserveTokens: number; keepRecentTokens: number };
+export type SkillVisibility = "on" | "name-only" | "user-invocable-only" | "off";
+
 export type WebSearchConfig = {
   enabled: boolean;
   order: string[];
@@ -29,6 +31,7 @@ export type CletusConfig = {
   >;
   compaction: CompactionConfig;
   webSearch: WebSearchConfig;
+  skillOverrides: Record<string, SkillVisibility>;
   permissions: { allowWrite: string[] };
   tui: {
     showThinking: boolean;
@@ -67,6 +70,7 @@ export function createDefaultConfig(): CletusConfig {
       order: ["parallel", "exa", "firecrawl", "brave", "tavily", "searxng", "duckduckgo"],
       timeoutSeconds: 30,
     },
+    skillOverrides: {},
     permissions: { allowWrite: [] },
     tui: { showThinking: true, theme: "dark", keybindings: {} },
   };
@@ -102,6 +106,7 @@ export async function loadConfig(home = cletusHome(), path = configPath(home)): 
       providers: { ...createDefaultConfig().providers, ...parsed.providers },
       compaction: { ...createDefaultConfig().compaction, ...parsed.compaction },
       webSearch: { ...createDefaultConfig().webSearch, ...parsed.webSearch },
+      skillOverrides: { ...createDefaultConfig().skillOverrides, ...parsed.skillOverrides },
       permissions: { ...createDefaultConfig().permissions, ...parsed.permissions },
       tui: { ...createDefaultConfig().tui, ...parsed.tui },
     };

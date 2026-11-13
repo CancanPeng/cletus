@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { SkillVisibility } from "../config.js";
 import { loadContextFiles, type ContextFile } from "./context-files.js";
 import { loadPrompts, type PromptTemplate } from "./prompts.js";
 import { loadSkills, setSkillModelInvocation, type Skill } from "./skills.js";
@@ -16,12 +17,13 @@ export class ResourceLoader {
   constructor(
     private readonly cwd: string,
     private readonly home: string,
+    private skillOverrides: Record<string, SkillVisibility> = {},
   ) {}
 
   async load(): Promise<LoadedResources> {
     const [contextFiles, skillResult, prompts] = await Promise.all([
       loadContextFiles(this.cwd, this.home),
-      loadSkills(this.cwd, this.home),
+      loadSkills(this.cwd, this.home, this.skillOverrides),
       loadPrompts(this.cwd, this.home),
     ]);
     const roots = [
@@ -47,6 +49,11 @@ export class ResourceLoader {
 
   reload(): void {
     this.loaded = undefined;
+  }
+
+  setSkillOverrides(overrides: Record<string, SkillVisibility>): void {
+    this.skillOverrides = { ...overrides };
+    this.reload();
   }
 
   async setSkillDisabled(name: string, disabled: boolean): Promise<Skill> {

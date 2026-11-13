@@ -21,6 +21,7 @@ import {
   writeJsonAtomic,
   type AuthStore,
   type CletusConfig,
+  type SkillVisibility,
 } from "./config.js";
 import { importPi } from "./config/import-pi.js";
 import { ResourceLoader } from "./resources/index.js";
@@ -485,6 +486,12 @@ async function runTui(opts: {
           app?.notify("Cannot manage skills while running", "warn");
           return;
         }
+        const states: Array<{ label: string; value: SkillVisibility }> = [
+          { label: "On", value: "on" },
+          { label: "Name only", value: "name-only" },
+          { label: "User only", value: "user-invocable-only" },
+          { label: "Off", value: "off" },
+        ];
         for (;;) {
           const skills = opts.resources.cached?.skills ?? [];
           if (skills.length === 0) {
@@ -494,36 +501,40 @@ async function runTui(opts: {
           const name = await app?.select(
             "Skills",
             skills.map((skill) => ({
-              label: `[${skill.disableModelInvocation ? "off" : "on"}] ${skill.name} — ${skill.description}`,
+              label: `[${skill.visibility}] ${skill.name} · ${skill.source} — ${skill.description}`,
               value: skill.name,
             })),
           );
           if (!name) return;
           const skill = skills.find((candidate) => candidate.name === name);
           if (!skill) return;
-          const action = await app?.select(`Skill: ${name}`, [
-            {
-              label: skill.disableModelInvocation
-                ? "Enable model invocation"
-                : "Disable model invocation",
-              value: "toggle",
-            },
-            { label: "Show path", value: "path" },
-            { label: "Reload skills", value: "reload" },
-          ]);
+          const action = await app?.select(
+            `Skill: ${name} [${skill.visibility}]`,
+            [
+              ...states.map((state) => ({
+                label: `Visibility: ${state.label}`,
+                value: state.value,
+              })),
+              { label: "Show path", value: "path" },
+              { label: "Reload skills", value: "reload" },
+            ],
+          );
           if (!action) return;
-          if (action === "toggle") {
-            await opts.resources.setSkillDisabled(name, !skill.disableModelInvocation);
-            await session.reload();
-            app?.notify(
-              `${skill.disableModelInvocation ? "Enabled" : "Disabled"} ${name} for model invocation`,
-            );
-          } else if (action === "path") {
+          if (action === "path") {
             app?.notify(skill.path);
-          } else if (action === "reload") {
+            continue;
+          }
+          if (action === "reload") {
             await session.reload();
             app?.notify("Skills reloaded");
+            continue;
           }
+          const visibility = action as SkillVisibility;
+          opts.config.skillOverrides[name] = visibility;
+          await writeJsonAtomic(configPath(opts.home), opts.config);
+          opts.resources.setSkillOverrides(opts.config.skillOverrides);
+          await session.reload();
+          app?.notify(`${name}: ${visibility}`);
         }
       },
     },
@@ -639,9 +650,16 @@ async function runTui(opts: {
       description: skill.description,
       run: async (args) => {
         if (!session) return;
-        const content = await readFile(skill.path, "utf8");
+        const current = opts.resources.cached?.skills.find(
+          (candidate) => candidate.name === skill.name,
+        );
+        if (!current || !current.userInvocable || current.visibility === "off") {
+          app?.notify(`Skill not available: ${skill.name}`, "warn");
+          return;
+        }
+        const content = await readFile(current.path, "utf8");
         await session.prompt(
-          `<skill name="${skill.name}" path="${skill.path}">\n${content}\n</skill>\n\n${args}`,
+          `<skill name="${current.name}" path="${current.path}">\n${content}\n</skill>\n\n${args}`,
         );
       },
     });
@@ -896,8 +914,11 @@ async function sessionsCommand(argv: string[]): Promise<number> {
 }
 
 async function skillsCommand(argv: string[]): Promise<number> {
-  const action = argv[0];
-  const loader = new ResourceLoader(process.cwd(), cletusHome());
+  const action = argv[0] ?? "list";
+  const name = argv[1];
+  const home = cletusHome();
+  const config = await loadConfig(home);
+  const loader = new ResourceLoader(process.cwd(), home, config.skillOverrides);
   const loaded = await loader.load();
   if (action === "list") {
     if (loaded.skills.length === 0) {
@@ -906,19 +927,45 @@ async function skillsCommand(argv: string[]): Promise<number> {
     }
     for (const skill of loaded.skills) {
       process.stdout.write(
-        `${skill.disableModelInvocation ? "off" : "on"}\t${skill.name}\t${skill.path}\t${skill.description}\n`,
+        `${skill.visibility}\t${skill.source}\t${skill.name}\t${skill.path}\t${skill.description}\n`,
       );
     }
     return 0;
   }
-  if (action === "enable" || action === "disable") {
-    const name = argv[1];
-    if (!name) throw new ConfigError(`Usage: cletus skills ${action} <name>`);
-    await loader.setSkillDisabled(name, action === "disable");
-    process.stdout.write(`${action === "enable" ? "Enabled" : "Disabled"} ${name}\n`);
+  if (action === "set" || action === "enable" || action === "disable") {
+    if (!name) throw new ConfigError(`Usage: cletus skills ${action} <name> [state]`);
+    let state: SkillVisibility;
+    if (action === "enable") state = "on";
+    else if (action === "disable") state = "off";
+    else {
+      const raw = argv[2] ?? "";
+      const mapped: Record<string, SkillVisibility> = {
+        on: "on",
+        "name-only": "name-only",
+        "user-only": "user-invocable-only",
+        "user-invocable-only": "user-invocable-only",
+        off: "off",
+      };
+      const value = mapped[raw];
+      if (!value) {
+        throw new ConfigError(
+          "Usage: cletus skills set <name> on|name-only|user-only|off",
+        );
+      }
+      state = value;
+    }
+    if (!loaded.skills.some((skill) => skill.name === name)) {
+      throw new ConfigError(`Skill not found: ${name}`);
+    }
+    config.skillOverrides[name] = state;
+    await writeJsonAtomic(configPath(home), config);
+    loader.setSkillOverrides(config.skillOverrides);
+    const updated = (await loader.load()).skills.find((skill) => skill.name === name);
+    if (!updated) throw new ConfigError(`Skill not found: ${name}`);
+    process.stdout.write(`${name}\t${updated.visibility}\n`);
     return 0;
   }
-  throw new ConfigError("Usage: cletus skills list|enable|disable");
+  throw new ConfigError("Usage: cletus skills list|set|enable|disable");
 }
 
 async function permissionsCommand(argv: string[]): Promise<number> {
@@ -1033,7 +1080,7 @@ async function main(): Promise<number> {
 
   const model = resolveModel(config, auth, parsed.values.model);
   const trustProject = await decideTrust(cwd, home, interactive, parsed.values.trust === true);
-  const resources = new ResourceLoader(cwd, home);
+  const resources = new ResourceLoader(cwd, home, config.skillOverrides);
   await resources.load();
 
   const extensions = new ExtensionHost({

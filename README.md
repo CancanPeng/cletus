@@ -83,14 +83,25 @@ Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a
 
 ## Skills
 
-`/skills` opens an interactive manager: select a skill, then enable/disable model invocation, show its path, or reload. The toggle edits `disable-model-invocation` in the skill's frontmatter. `/skill:<name>` always works even when model invocation is disabled.
+`/skills` opens an interactive manager inspired by Claude Code. Select a skill, then choose its visibility:
+
+| State | Listed to model | `/skill:<name>` |
+|---|---|---|
+| `on` | name + description | yes |
+| `name-only` | name only | yes |
+| `user-invocable-only` | hidden | yes |
+| `off` | hidden | hidden |
+
+The choice is saved to `skillOverrides` in `~/.cletus/config.json`, so shared `SKILL.md` files are never modified. Frontmatter `disable-model-invocation` and `user-invocable` are honored when no override is set. Skill names fall back to the directory name, descriptions fall back to the first non-empty body line, and `when_to_use` is appended to the model listing.
 
 CLI equivalents:
 
 ```bash
 cletus skills list
-cletus skills enable demo
-cletus skills disable demo
+cletus skills set demo name-only
+cletus skills set demo user-only
+cletus skills enable demo   # alias for on
+cletus skills disable demo  # alias for off
 ```
 
 ## Web search

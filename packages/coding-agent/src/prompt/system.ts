@@ -43,9 +43,12 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
 
   const visibleSkills = input.skills.filter((skill) => !skill.disableModelInvocation);
   if (visibleSkills.length > 0) {
-    const lines = visibleSkills.map(
-      (skill) => `- ${skill.name}: ${skill.description} (path: ${skill.path})`,
-    );
+    const lines = visibleSkills.map((skill) => {
+      const description = skill.visibility === "name-only"
+        ? ""
+        : `: ${skill.description}${skill.whenToUse ? ` ${skill.whenToUse}` : ""}`;
+      return `- ${skill.name}${description} (path: ${skill.path})`;
+    });
     sections.push(`<skills>\n${lines.join("\n")}\n</skills>`);
   }
 

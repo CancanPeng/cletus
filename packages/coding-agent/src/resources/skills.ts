@@ -1,26 +1,40 @@
 import { chmod, glob, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import type { SkillVisibility } from "../config.js";
 import { findRepoRoot } from "./context-files.js";
+
+export type SkillState = SkillVisibility | "model-only";
+export type SkillSource = "personal" | "project" | "ancestor";
 
 export type Skill = {
   name: string;
   description: string;
   path: string;
   disableModelInvocation: boolean;
+  userInvocable: boolean;
+  visibility: SkillState;
+  override?: SkillVisibility;
+  whenToUse?: string;
+  source: SkillSource;
 };
 
-function parseFrontmatter(text: string): Record<string, unknown> {
-  if (!text.startsWith("---\n") && !text.startsWith("---\r\n")) return {};
+function parseFrontmatter(text: string): { meta: Record<string, unknown>; body: string } {
+  if (!text.startsWith("---\n") && !text.startsWith("---\r\n")) {
+    return { meta: {}, body: text };
+  }
   const end = text.indexOf("\n---", 3);
-  if (end < 0) return {};
+  if (end < 0) return { meta: {}, body: text };
   const raw = text.slice(3, end).trim();
+  const headerEnd = text.indexOf("\n", end + 1);
+  let meta: Record<string, unknown> = {};
   try {
     const parsed = parseYaml(raw);
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    if (parsed && typeof parsed === "object") meta = parsed as Record<string, unknown>;
   } catch {
-    return {};
+    meta = {};
   }
+  return { meta, body: headerEnd >= 0 ? text.slice(headerEnd + 1) : "" };
 }
 
 async function skillsIn(dir: string): Promise<string[]> {
@@ -38,19 +52,24 @@ async function skillsIn(dir: string): Promise<string[]> {
   return found;
 }
 
+function firstLine(body: string): string {
+  return body.split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? "";
+}
+
 export async function loadSkills(
   cwd: string,
   home: string,
+  overrides: Record<string, SkillVisibility> = {},
 ): Promise<{ skills: Skill[]; roots: string[] }> {
   const root = await findRepoRoot(cwd);
-  const dirs: string[] = [
-    join(home, "skills"),
-    join(cwd, ".cletus", "skills"),
-    join(cwd, ".agents", "skills"),
+  const dirs: Array<{ dir: string; source: SkillSource }> = [
+    { dir: join(home, "skills"), source: "personal" },
+    { dir: join(cwd, ".cletus", "skills"), source: "project" },
+    { dir: join(cwd, ".agents", "skills"), source: "project" },
   ];
   let current = cwd;
   for (;;) {
-    dirs.push(join(current, ".agents", "skills"));
+    dirs.push({ dir: join(current, ".agents", "skills"), source: "ancestor" });
     if (current === root) break;
     const parent = dirname(current);
     if (parent === current) break;
@@ -58,11 +77,20 @@ export async function loadSkills(
   }
 
   const seenPaths = new Set<string>();
+  const seenDirs = new Set<string>();
   const skills: Skill[] = [];
   const names = new Set<string>();
   const roots = new Set<string>();
 
-  for (const dir of dirs) {
+  for (const { dir, source } of dirs) {
+    let realDir = dir;
+    try {
+      realDir = await realpath(dir);
+    } catch {
+      continue;
+    }
+    if (seenDirs.has(realDir)) continue;
+    seenDirs.add(realDir);
     for (const file of await skillsIn(dir)) {
       let real = file;
       try {
@@ -78,9 +106,15 @@ export async function loadSkills(
       } catch {
         continue;
       }
-      const meta = parseFrontmatter(text);
-      const name = typeof meta["name"] === "string" ? meta["name"] : "";
-      const description = typeof meta["description"] === "string" ? meta["description"] : "";
+      const { meta, body } = parseFrontmatter(text);
+      const name =
+        typeof meta["name"] === "string" && meta["name"].trim()
+          ? meta["name"].trim()
+          : basename(dirname(real));
+      const description =
+        typeof meta["description"] === "string" && meta["description"].trim()
+          ? meta["description"].trim()
+          : firstLine(body);
       if (!name || !description) continue;
       if (names.has(name)) {
         process.stderr.write(`Warning: duplicate skill ${name}; keeping first\n`);
@@ -88,12 +122,39 @@ export async function loadSkills(
       }
       names.add(name);
       roots.add(dirname(real));
-      skills.push({
+
+      const override = overrides[name];
+      const frontmatterDisable = meta["disable-model-invocation"] === true;
+      const frontmatterUser = meta["user-invocable"] !== false;
+      const modelVisible = override
+        ? override === "on" || override === "name-only"
+        : !frontmatterDisable;
+      const userInvocable = override
+        ? override !== "off"
+        : frontmatterUser;
+      const visibility: SkillState =
+        override ??
+        (!modelVisible
+          ? userInvocable
+            ? "user-invocable-only"
+            : "off"
+          : userInvocable
+            ? "on"
+            : "model-only");
+      const skill: Skill = {
         name,
         description,
         path: real,
-        disableModelInvocation: meta["disable-model-invocation"] === true,
-      });
+        disableModelInvocation: !modelVisible,
+        userInvocable,
+        visibility,
+        source,
+      };
+      if (override) skill.override = override;
+      if (typeof meta["when_to_use"] === "string") {
+        skill.whenToUse = meta["when_to_use"];
+      }
+      skills.push(skill);
     }
   }
   return { skills, roots: [...roots] };

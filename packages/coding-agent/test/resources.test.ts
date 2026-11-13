@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ResourceLoader } from "../src/resources/index.js";
+import { buildSystemPrompt } from "../src/prompt/system.js";
 import { expandTemplate } from "../src/resources/prompts.js";
 
 const dirs: string[] = [];
@@ -37,6 +38,44 @@ describe("resources", () => {
     expect(loaded.prompts.map((prompt) => prompt.name)).toContain("review");
     expect(loaded.contextFiles[0]?.content).toContain("two spaces");
     expect(loaded.readOnlyRoots.some((root) => root.endsWith("/skills/pdf"))).toBe(true);
+  });
+
+  it("applies visibility overrides and name-only listings", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    await mkdir(join(home, "skills", "review"), { recursive: true });
+    const path = join(home, "skills", "review", "SKILL.md");
+    await writeFile(path, "---\nname: review\ndescription: Review code\n---\nBody\n");
+    const loader = new ResourceLoader(cwd, home, {
+      review: "name-only",
+    });
+    const loaded = await loader.load();
+    const skill = loaded.skills.find((candidate) => candidate.name === "review");
+    expect(skill?.visibility).toBe("name-only");
+    expect(skill?.disableModelInvocation).toBe(false);
+    const prompt = buildSystemPrompt({
+      cwd,
+      tools: [],
+      contextFiles: [],
+      skills: loaded.skills,
+    });
+    expect(prompt).toContain("- review (path:");
+    expect(prompt).not.toContain("Review code");
+    loader.setSkillOverrides({ review: "off" });
+    const off = (await loader.load()).skills.find((candidate) => candidate.name === "review");
+    expect(off?.visibility).toBe("off");
+    expect(off?.disableModelInvocation).toBe(true);
+    expect(off?.userInvocable).toBe(false);
+  });
+
+  it("uses directory and body fallbacks for skill metadata", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    await mkdir(join(home, "skills", "unnamed"), { recursive: true });
+    await writeFile(join(home, "skills", "unnamed", "SKILL.md"), "First line description\n");
+    const loader = new ResourceLoader(cwd, home);
+    const skill = (await loader.load()).skills.find((candidate) => candidate.name === "unnamed");
+    expect(skill?.description).toBe("First line description");
   });
 
   it("toggles model invocation by editing skill frontmatter", async () => {
