@@ -228,6 +228,32 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("collects input and runs manager actions", async () => {
+    const ctx = await setupApp();
+    const input = ctx.app.promptInput("Search skills", "query");
+    await ctx.flush();
+    ctx.mockInput.typeText("pdf");
+    ctx.mockInput.pressEnter();
+    await ctx.flush();
+    await expect(input).resolves.toBe("pdf");
+
+    let searches = 0;
+    const manager = ctx.app.manageItems(
+      "Skills",
+      [],
+      () => undefined,
+      [{ key: "s", label: "search", run: () => { searches += 1; } }],
+    );
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("s search");
+    ctx.mockInput.typeText("s");
+    await ctx.flush();
+    await expect(manager).resolves.toBeUndefined();
+    expect(searches).toBe(1);
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("renders assistant markdown and tool cards", async () => {
     const ctx = await setupApp();
     ctx.app.appendBlock({

@@ -1,6 +1,7 @@
 import {
   BoxRenderable,
   CliRenderEvents,
+  InputRenderable,
   MarkdownRenderable,
   ScrollBoxRenderable,
   SyntaxStyle,
@@ -18,6 +19,12 @@ export type ManagedItem = {
   label: string;
   state: string;
   states: string[];
+};
+
+export type ManagedAction = {
+  key: string;
+  label: string;
+  run: () => void;
 };
 
 export type SlashCommand = {
@@ -108,6 +115,15 @@ export class TuiApp {
         index: number;
         resolve: () => void;
         onCycle: (id: string, state: string) => Promise<void> | void;
+        actions: ManagedAction[];
+      }
+    | undefined;
+  private inputModal:
+    | {
+        title: string;
+        box: BoxRenderable;
+        input: InputRenderable;
+        resolve: (value: string | undefined) => void;
       }
     | undefined;
   private managerBox: BoxRenderable | undefined;
@@ -276,6 +292,8 @@ export class TuiApp {
     this.modal = undefined;
     this.manager?.resolve();
     this.manager = undefined;
+    this.inputModal?.resolve(undefined);
+    this.inputModal = undefined;
     this.selectState?.resolve(undefined);
     this.selectState = undefined;
     this.renderer?.keyInput.off("keypress", this.handleKey);
@@ -342,6 +360,10 @@ export class TuiApp {
       this.managerBox.backgroundColor = theme.background;
       this.managerBox.borderColor = theme.colors.accent;
     }
+    if (this.inputModal) {
+      this.inputModal.box.backgroundColor = theme.background;
+      this.inputModal.box.borderColor = theme.colors.accent;
+    }
     if (this.completionItems.length > 0) this.renderCompletion();
     if (this.editorBox) {
       this.editorBox.backgroundColor = theme.colors.inputBg;
@@ -381,6 +403,7 @@ export class TuiApp {
     title: string,
     items: ManagedItem[],
     onCycle: (id: string, state: string) => Promise<void> | void,
+    actions: ManagedAction[] = [],
   ): Promise<void> {
     this.hideCompletion();
     this.manager?.resolve();
@@ -391,8 +414,59 @@ export class TuiApp {
       index: 0,
       resolve: state.resolve,
       onCycle,
+      actions,
     };
     this.renderManager();
+    return state.promise;
+  }
+
+  promptInput(title: string, placeholder: string): Promise<string | undefined> {
+    if (!this.renderer || !this.root) return Promise.resolve(undefined);
+    this.inputModal?.resolve(undefined);
+    this.inputModal?.box.destroyRecursively();
+    const state = Promise.withResolvers<string | undefined>();
+    const box = new BoxRenderable(this.renderer, {
+      id: "input-modal",
+      position: "absolute",
+      top: "34%",
+      left: "15%",
+      width: "70%",
+      height: 5,
+      border: true,
+      borderStyle: "rounded",
+      borderColor: this.color("accent"),
+      backgroundColor: this.theme.background,
+      paddingX: 1,
+      flexDirection: "column",
+      zIndex: 120,
+    });
+    box.add(
+      new TextRenderable(this.renderer, {
+        content: title,
+        fg: this.color("accent"),
+        wrapMode: "none",
+        truncate: true,
+        width: "100%",
+      }),
+    );
+    const input: InputRenderable = new InputRenderable(this.renderer, {
+      width: "100%",
+      placeholder,
+      placeholderColor: this.color("inputPlaceholder"),
+      backgroundColor: this.theme.colors.inputBg,
+      textColor: this.color("inputText"),
+      focusedBackgroundColor: this.theme.colors.inputBg,
+      focusedTextColor: this.color("inputText"),
+      cursorColor: this.color("inputFocus"),
+      onSubmit: () => this.finishInput(input.value),
+    });
+    box.add(input);
+    this.root.add(box);
+    this.textarea?.blur();
+    this.inputModal = { title, box, input, resolve: state.resolve };
+    input.focus();
+    this.updateFooter();
+    this.renderer.requestRender();
     return state.promise;
   }
 
@@ -592,6 +666,16 @@ export class TuiApp {
   }
 
   private handleKey = (key: KeyEvent): void => {
+    if (this.inputModal) {
+      if (key.name === "escape") {
+        this.intercept(key);
+        this.finishInput(undefined);
+      } else if (key.name === "return" || key.name === "enter") {
+        this.intercept(key);
+        this.finishInput(this.inputModal.input.value);
+      }
+      return;
+    }
     if (this.manager) {
       this.handleManagerKey(key);
       return;
@@ -884,6 +968,7 @@ export class TuiApp {
   }
 
   private footerLeftContent(): string {
+    if (this.inputModal) return this.inputModal.title;
     if (this.manager) return "managing skills";
     const usage = this.status.context
       ? `ctx ${this.status.context}`
@@ -906,7 +991,11 @@ export class TuiApp {
 
   private footerRightContent(): string {
     const bindings = this.options.keybindings;
-    if (this.manager) return "↑↓ move · space cycle · enter/esc close";
+    if (this.inputModal) return "enter confirm · esc cancel";
+    if (this.manager) {
+      const actions = this.manager.actions.map((action) => `${action.key} ${action.label}`).join(" · ");
+      return `↑↓ move · space cycle${actions ? ` · ${actions}` : ""} · enter/esc close`;
+    }
     if (this.modal) {
       return `${bindings.get("modalAllow")[0]} allow · ${bindings.get("modalSession")[0]} session · ${bindings.get("modalDeny")[0]} deny`;
     }
@@ -936,13 +1025,13 @@ export class TuiApp {
     const manager = this.manager;
     if (!manager) return;
     if (key.name === "escape" || key.name === "return") {
-      this.manager = undefined;
-      this.managerBox?.destroyRecursively();
-      this.managerBox = undefined;
-      this.managerRows = [];
-      manager.resolve();
-      this.textarea?.focus();
-      this.updateFooter();
+      this.closeManager();
+      return;
+    }
+    const action = manager.actions.find((candidate) => candidate.key === key.name);
+    if (action) {
+      this.closeManager();
+      action.run();
       return;
     }
     if (key.name === "up") {
@@ -965,6 +1054,28 @@ export class TuiApp {
         this.notify(error instanceof Error ? error.message : String(error), "error");
       });
     }
+  }
+
+  private closeManager(): void {
+    const manager = this.manager;
+    if (!manager) return;
+    this.manager = undefined;
+    this.managerBox?.destroyRecursively();
+    this.managerBox = undefined;
+    this.managerRows = [];
+    manager.resolve();
+    this.textarea?.focus();
+    this.updateFooter();
+  }
+
+  private finishInput(value: string | undefined): void {
+    const modal = this.inputModal;
+    if (!modal) return;
+    this.inputModal = undefined;
+    modal.box.destroyRecursively();
+    modal.resolve(value);
+    this.textarea?.focus();
+    this.updateFooter();
   }
 
   private renderManager(): void {
@@ -1013,9 +1124,12 @@ export class TuiApp {
       rows.push(row);
       box.add(row);
     }
+    const actionHint = manager.actions
+      .map((action) => `${action.key} ${action.label}`)
+      .join(" · ");
     box.add(
       new TextRenderable(this.renderer, {
-        content: "Space cycle · Enter/Esc close",
+        content: `Space cycle${actionHint ? ` · ${actionHint}` : ""} · Enter/Esc close`,
         fg: this.color("muted"),
         wrapMode: "none",
         truncate: true,

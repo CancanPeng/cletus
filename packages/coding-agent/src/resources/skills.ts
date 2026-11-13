@@ -1,4 +1,5 @@
-import { chmod, glob, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { chmod, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -38,18 +39,54 @@ function parseFrontmatter(text: string): { meta: Record<string, unknown>; body: 
   return { meta, body: headerEnd >= 0 ? text.slice(headerEnd + 1) : "" };
 }
 
+const MAX_SKILL_DEPTH = 8;
+
 async function skillsIn(dir: string): Promise<string[]> {
   const found: string[] = [];
-  try {
-    for await (const file of glob("**/SKILL.md", {
-      cwd: dir,
-      exclude: ["**/node_modules/**", "**/.git/**"],
-    })) {
-      found.push(join(dir, file));
+  const seen = new Set<string>();
+
+  async function walk(current: string, depth: number): Promise<void> {
+    if (depth > MAX_SKILL_DEPTH) return;
+    let real: string;
+    try {
+      real = await realpath(current);
+    } catch {
+      return;
     }
-  } catch {
-    // missing directory
+    if (seen.has(real)) return;
+    seen.add(real);
+
+    let entries: Dirent[];
+    try {
+      entries = await readdir(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name === "node_modules" || entry.name === ".git") continue;
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) {
+        await walk(path, depth + 1);
+        continue;
+      }
+      // Symlinks may point at a skill directory (e.g. `~/.agents/skills/x -> ...`)
+      // or at a SKILL.md file, so resolve them before deciding.
+      if (entry.isSymbolicLink()) {
+        try {
+          const info = await stat(path);
+          if (info.isDirectory()) {
+            await walk(path, depth + 1);
+            continue;
+          }
+        } catch {
+          continue;
+        }
+      }
+      if (entry.name === "SKILL.md") found.push(path);
+    }
   }
+
+  await walk(dir, 0);
   return found;
 }
 

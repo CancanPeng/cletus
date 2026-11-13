@@ -25,6 +25,7 @@ import {
 } from "./config.js";
 import { importPi } from "./config/import-pi.js";
 import { ResourceLoader } from "./resources/index.js";
+import { installRegistrySkill, searchSkillRegistry, type RegistrySkill } from "./resources/skills-registry.js";
 import { buildSystemPrompt } from "./prompt/system.js";
 import { ExtensionHost } from "./extensions/host.js";
 import { McpManager } from "./mcp/manager.js";
@@ -487,10 +488,6 @@ async function runTui(opts: {
           return;
         }
         const loaded = await opts.resources.load();
-        if (loaded.skills.length === 0) {
-          app?.notify("No skills found", "warn");
-          return;
-        }
         const items = loaded.skills.map((skill) => ({
           id: skill.name,
           label: `${skill.name} · ${skill.source} — ${skill.description}`,
@@ -500,16 +497,80 @@ async function runTui(opts: {
               : skill.visibility,
           states: ["on", "name-only", "user-only", "off"],
         }));
-        await app?.manageItems("Skills", items, async (name, state) => {
-          const visibility: SkillVisibility =
-            state === "user-only" ? "user-invocable-only" : state as SkillVisibility;
-          opts.config.skillOverrides[name] = visibility;
-          await writeJsonAtomic(configPath(opts.home), opts.config);
-          opts.resources.setSkillOverrides(opts.config.skillOverrides);
-        });
+        const install = async (entry: RegistrySkill): Promise<void> => {
+          const approved = await app?.confirm(
+            "Install skill",
+            `${entry.source} · ${entry.skillId}\n\nInstall globally and copy into ~/.claude/skills?`,
+          );
+          if (approved !== "allow" && approved !== "session") return;
+          app?.notify(`Installing ${entry.source}/${entry.skillId}…`);
+          await installRegistrySkill(entry);
+          await opts.resources.load();
+          syncSkillCommands();
+          app?.notify(`Installed ${entry.name}`);
+        };
+        const search = async (): Promise<void> => {
+          const query = await app?.promptInput("Search skills.sh", "pdf, testing, design…");
+          if (!query) return;
+          app?.notify(`Searching skills.sh for ${query}…`);
+          const results = await searchSkillRegistry(query);
+          if (results.length === 0) {
+            app?.notify("No skills found", "warn");
+            return;
+          }
+          const choice = await app?.select(
+            "Install skill",
+            results.map((entry) => ({
+              label: `${entry.name} · ${entry.source} · ${entry.installs.toLocaleString()} installs`,
+              value: entry.id,
+            })),
+          );
+          const entry = results.find((candidate) => candidate.id === choice);
+          if (entry) await install(entry);
+        };
+        const installFromPackage = async (): Promise<void> => {
+          const value = await app?.promptInput(
+            "Install from GitHub",
+            "owner/repo#skill",
+          );
+          if (!value) return;
+          const split = value.lastIndexOf("#");
+          if (split <= 0 || split === value.length - 1) {
+            app?.notify("Use owner/repo#skill", "warn");
+            return;
+          }
+          await install({
+            id: value,
+            source: value.slice(0, split),
+            skillId: value.slice(split + 1),
+            name: value.slice(split + 1),
+            installs: 0,
+          });
+        };
+        let changed = false;
+        try {
+          await app?.manageItems(
+            "Skills",
+            items,
+            async (name, state) => {
+              changed = true;
+              const visibility: SkillVisibility =
+                state === "user-only" ? "user-invocable-only" : state as SkillVisibility;
+              opts.config.skillOverrides[name] = visibility;
+              await writeJsonAtomic(configPath(opts.home), opts.config);
+              opts.resources.setSkillOverrides(opts.config.skillOverrides);
+            },
+            [
+              { key: "s", label: "search", run: () => void search() },
+              { key: "i", label: "install", run: () => void installFromPackage() },
+            ],
+          );
+        } catch (error) {
+          app?.notify(error instanceof Error ? error.message : String(error), "error");
+        }
         await opts.resources.load();
         syncSkillCommands();
-        app?.notify("Skills saved");
+        if (changed) app?.notify("Skills saved");
       },
     },
     {

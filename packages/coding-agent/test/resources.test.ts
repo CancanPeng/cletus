@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -76,6 +76,24 @@ describe("resources", () => {
     const loader = new ResourceLoader(cwd, home);
     const skill = (await loader.load()).skills.find((candidate) => candidate.name === "unnamed");
     expect(skill?.description).toBe("First line description");
+  });
+
+  it("discovers skills inside a symlinked directory", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    const installed = await temp();
+    await mkdir(join(installed, "ego-browser"), { recursive: true });
+    await writeFile(
+      join(installed, "ego-browser", "SKILL.md"),
+      "---\nname: ego-browser\ndescription: Drive a browser\n---\nBody\n",
+    );
+    await mkdir(join(home, ".agents", "skills"), { recursive: true });
+    await symlink(join(installed, "ego-browser"), join(home, ".agents", "skills", "ego-browser"));
+    const loader = new ResourceLoader(cwd, home);
+    const loaded = await loader.load();
+    const skill = loaded.skills.find((candidate) => candidate.name === "ego-browser");
+    expect(skill).toBeDefined();
+    expect(skill?.description).toBe("Drive a browser");
   });
 
   it("toggles model invocation by editing skill frontmatter", async () => {

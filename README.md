@@ -85,6 +85,13 @@ Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a
 
 `/skills` opens a single popup manager inspired by Claude Code. Use Up/Down to move, `Space` to cycle visibility, and `Enter` or `Esc` to close. Changes are saved immediately to `~/.cletus/config.json`.
 
+From the same popup:
+
+- `s` searches skills.sh and installs a selected result
+- `i` installs `owner/repo#skill` from GitHub
+
+Installation downloads the skill directory through the GitHub API into `~/.claude/skills/<skill>` after confirmation, then reloads the skill list and slash commands.
+
 | State | Listed to model | `/<skill-name>` |
 |---|---|---|
 | `on` | name + description | yes |
