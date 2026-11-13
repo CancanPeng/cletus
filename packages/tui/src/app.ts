@@ -138,6 +138,7 @@ export class TuiApp {
     queue: number;
     activity?: string;
     context?: string;
+    duration?: string;
   } = { busy: false, model: "", tokens: "", queue: 0 };
   private spinner = 0;
   private spinnerTimer: NodeJS.Timeout | undefined;
@@ -322,6 +323,7 @@ export class TuiApp {
     queue: number;
     activity?: string;
     context?: string;
+    duration?: string;
   }): void {
     this.status = status;
     if (status.busy && !this.spinnerTimer) {
@@ -986,7 +988,7 @@ export class TuiApp {
       ].filter(Boolean).join(" · ");
       return `${SPINNER[this.spinner] ?? "⠋"} ${activity}${suffix ? ` · ${suffix}` : ""}`;
     }
-    return `● ready${usage ? ` · ${usage}` : ""}${this.yolo ? " · YOLO" : ""}`;
+    return `● ready${usage ? ` · ${usage}` : ""}${this.status.duration ? ` · ${this.status.duration}` : ""}${this.yolo ? " · YOLO" : ""}`;
   }
 
   private footerRightContent(): string {

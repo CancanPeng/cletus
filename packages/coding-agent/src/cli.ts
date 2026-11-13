@@ -169,6 +169,15 @@ function shortTokens(value: number): string {
   return String(value);
 }
 
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = Math.round(ms / 100) / 10;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  return `${minutes}m ${rest}s`;
+}
+
 function contextLabel(session: AgentSession): string {
   const usage = session.getContextUsage();
   const percent = usage.window > 0 ? Math.round((usage.used / usage.window) * 100) : 0;
@@ -244,6 +253,8 @@ async function runTui(opts: {
   let assistantId: string | undefined;
   let assistantText = "";
   let blockCounter = 0;
+  let conversationStart: number | undefined;
+  let lastDuration: string | undefined;
   let branch = await gitBranch(opts.cwd);
 
   const refreshHeader = async (): Promise<void> => {
@@ -342,13 +353,19 @@ async function runTui(opts: {
         context: contextLabel(session),
       });
     } else if (event.type === "agent_end") {
+      lastDuration = conversationStart
+        ? formatDuration(Date.now() - conversationStart)
+        : undefined;
+      conversationStart = undefined;
       app.setStatus({
         busy: false,
         model: session.model.ref ?? session.model.id,
         tokens: "",
         queue: 0,
         context: contextLabel(session),
+        ...(lastDuration ? { duration: lastDuration } : {}),
       });
+      if (lastDuration) app.notify(`Finished in ${lastDuration}`);
       assistantId = undefined;
     }
   };
@@ -704,6 +721,8 @@ async function runTui(opts: {
         text: `/${name}${args ? ` ${args}` : ""}`,
       });
       app?.notify(`Loading skill ${name}…`);
+      conversationStart = Date.now();
+      lastDuration = undefined;
       app?.setStatus({
         busy: true,
         model: session.model.ref ?? session.model.id,
@@ -730,6 +749,7 @@ async function runTui(opts: {
           tokens: "",
           queue: session.agent.queuedMessageCount,
           context: contextLabel(session),
+          ...(lastDuration ? { duration: lastDuration } : {}),
         });
       }
     },
@@ -802,6 +822,8 @@ async function runTui(opts: {
         session.steer(text);
         return;
       }
+      conversationStart = Date.now();
+      lastDuration = undefined;
       app?.setStatus({
         busy: true,
         model: session.model.ref ?? session.model.id,
@@ -819,6 +841,7 @@ async function runTui(opts: {
           tokens: "",
           queue: session.agent.queuedMessageCount,
           context: contextLabel(session),
+          ...(lastDuration ? { duration: lastDuration } : {}),
         });
       }
     },
