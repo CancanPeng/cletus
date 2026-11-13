@@ -176,6 +176,7 @@ export class TuiApp {
       (await createCliRenderer({
         exitOnCtrlC: false,
         targetFps: 30,
+        useMouse: true,
         backgroundColor: this.theme.background,
         clearOnShutdown: true,
       }));
@@ -313,7 +314,8 @@ export class TuiApp {
   appendBlock(block: TranscriptBlock): void {
     this.blocks.set(block.id, block);
     this.order.push(block.id);
-    this.addView(block);
+    const follow = block.kind === "user" || this.isAtBottom();
+    this.addView(block, follow);
   }
 
   updateBlock(id: string, patch: Partial<TranscriptBlock>): void {
@@ -567,12 +569,21 @@ export class TuiApp {
     });
   }
 
-  private addView(block: TranscriptBlock): void {
+  private addView(block: TranscriptBlock, follow = true): void {
     if (!this.renderer || !this.scrollbox) return;
     const view = this.createView(block);
     this.views.set(block.id, view);
     this.scrollbox.add(view.box);
-    this.scrollbox.scrollTo(Infinity);
+    if (follow) this.scrollbox.scrollTo(Infinity);
+  }
+
+  private isAtBottom(): boolean {
+    if (!this.scrollbox) return true;
+    const viewport = this.scrollbox.viewport.height;
+    return (
+      this.scrollbox.scrollHeight <= viewport ||
+      this.scrollbox.scrollTop >= this.scrollbox.scrollHeight - viewport - 1
+    );
   }
 
   private createView(block: TranscriptBlock): BlockView {
@@ -655,6 +666,7 @@ export class TuiApp {
   private updateView(block: TranscriptBlock): void {
     const view = this.views.get(block.id);
     if (!view) return;
+    const follow = this.isAtBottom();
     if (view.kind === "user" && block.kind === "user") {
       view.text.content = `› ${block.text}`;
     } else if (view.kind === "assistant" && block.kind === "assistant") {
@@ -672,7 +684,7 @@ export class TuiApp {
     } else if (view.kind === "notice" && block.kind === "notice") {
       view.text.content = `! ${block.text}`;
     }
-    this.scrollbox?.scrollTo(Infinity);
+    if (follow) this.scrollbox?.scrollTo(Infinity);
   }
 
   private rebuildBlocks(): void {

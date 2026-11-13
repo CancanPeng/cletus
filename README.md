@@ -64,6 +64,7 @@ In the TUI use `/permissions list`, `/permissions add src/**`, `/permissions rem
 | Ctrl+D | exit when input is empty |
 | Ctrl+O | toggle tool output |
 | PgUp/PgDown | scroll transcript |
+| Mouse wheel | scroll transcript; auto-follow pauses when scrolled up |
 | Tab | complete slash command |
 | Up/Down | history (empty input) |
 
