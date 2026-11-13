@@ -80,7 +80,7 @@ export function createDefaultConfig(): CletusConfig {
       showThinking: true,
       theme: "dark",
       keybindings: {},
-      symbols: { preset: "unicode", overrides: {} },
+      symbols: { preset: "nerd", overrides: {} },
     },
   };
 }

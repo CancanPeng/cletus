@@ -174,10 +174,10 @@ export type SymbolConfig = {
 export function getTheme(name: string, symbols?: SymbolConfig): Theme {
   const key = name in THEMES ? (name as Theme["name"]) : "dark";
   if (key !== name) process.stderr.write(`Warning: unknown theme ${name}; using dark\n`);
-  const presetName = symbols?.preset ?? "unicode";
-  const preset = presetName in SYMBOLS ? presetName : "unicode";
+  const presetName = symbols?.preset ?? "nerd";
+  const preset = presetName in SYMBOLS ? presetName : "nerd";
   if (preset !== presetName) {
-    process.stderr.write(`Warning: unknown symbol preset ${presetName}; using unicode\n`);
+    process.stderr.write(`Warning: unknown symbol preset ${presetName}; using nerd\n`);
   }
   const resolved: Record<SymbolKey, string> = {
     ...SYMBOLS[preset],

@@ -83,8 +83,8 @@ Icons: `◆` app, `◈` model, `⌂` cwd, `⎇` git branch, `▣` session, `✓`
 Symbol presets:
 
 ```text
-/symbols unicode   # default
-/symbols nerd      # Nerd Font glyphs
+/symbols nerd      # default (Nerd Font glyphs)
+/symbols unicode   # standard Unicode glyphs
 /symbols ascii     # ASCII fallback
 ```
 
@@ -94,7 +94,7 @@ Configure in `~/.cletus/config.json`:
 {
   "tui": {
     "symbols": {
-      "preset": "unicode",
+      "preset": "nerd",
       "overrides": { "ready": "OK" }
     }
   }

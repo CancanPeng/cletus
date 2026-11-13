@@ -12,7 +12,7 @@ async function setupApp(overrides: Record<string, string | string[]> = {}) {
   ];
   const app = new TuiApp({
     header: "cletus test",
-    theme: getTheme("dark"),
+    theme: getTheme("dark", { preset: "unicode" }),
     keybindings: new KeybindingsManager(overrides),
     submit: async (text) => {
       submissions.push(text);
@@ -62,7 +62,7 @@ describe("TuiApp", () => {
     let aborts = 0;
     const app = new TuiApp({
       header: "cletus test",
-      theme: getTheme("dark"),
+      theme: getTheme("dark", { preset: "unicode" }),
       keybindings: new KeybindingsManager({ abort: "ctrl+x" }),
       submit: async () => undefined,
       abort: () => {
@@ -90,6 +90,7 @@ describe("TuiApp", () => {
       preset: "ascii",
       overrides: { ready: "OK" },
     });
+    expect(getTheme("dark").symbol("app")).toBe("\uf120");
     expect(ascii.symbol("app")).toBe("*");
     expect(ascii.symbol("ready")).toBe("OK");
     ctx.app.setTheme(ascii);
