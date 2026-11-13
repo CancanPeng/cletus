@@ -7,6 +7,7 @@ import {
   createHostClipboard,
   createRendererClipboardAdapter,
   type ClipboardService,
+  type Selection,
   ScrollBoxRenderable,
   SyntaxStyle,
   TextRenderable,
@@ -312,6 +313,10 @@ export class TuiApp {
         this.editorBox.borderColor =
           current === this.textarea ? this.color("inputFocus") : this.color("inputBorder");
       }
+    });
+    this.renderer.on(CliRenderEvents.SELECTION, (selection: Selection) => {
+      const text = selection.getSelectedText();
+      if (text) void this.writeClipboard(text);
     });
     this.renderer.keyInput.on("keypress", this.handleKey);
     this.textarea.focus();
@@ -1361,16 +1366,8 @@ export class TuiApp {
     return this.clipboard;
   }
 
-  private async copyText(): Promise<void> {
-    const textarea = this.textarea;
-    if (!textarea) return;
-    const text = textarea.hasSelection()
-      ? textarea.getSelectedText()
-      : textarea.plainText;
-    if (!text) {
-      this.notify("Nothing to copy", "warn");
-      return;
-    }
+  private async writeClipboard(text: string): Promise<void> {
+    if (!text) return;
     const clipboard = this.getClipboard();
     if (!clipboard) return;
     try {
@@ -1383,6 +1380,19 @@ export class TuiApp {
     } catch (error) {
       this.notify(error instanceof Error ? error.message : String(error), "error");
     }
+  }
+
+  private async copyText(): Promise<void> {
+    const textarea = this.textarea;
+    if (!textarea) return;
+    const text = textarea.hasSelection()
+      ? textarea.getSelectedText()
+      : textarea.plainText;
+    if (!text) {
+      this.notify("Nothing to copy", "warn");
+      return;
+    }
+    await this.writeClipboard(text);
   }
 
   private async pasteText(): Promise<void> {
