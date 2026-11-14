@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import { AssistantEventStream } from "./event-stream.js";
 import { parseSse } from "./sse.js";
 import { parseRetryAfter, sleep } from "./retry.js";
-import { toolContentText } from "./tokens.js";
 import {
   assistantMessage,
   emptyUsage,
@@ -79,10 +78,26 @@ async function toAnthropicMessages(messages: Message[]): Promise<Array<Record<st
         }
       }
     } else if (message.role === "toolResult") {
+      const blocks: Array<Record<string, unknown>> = [];
+      for (const block of message.content) {
+        if (block.type === "text") {
+          blocks.push({ type: "text", text: block.text });
+          continue;
+        }
+        try {
+          const data = (await readFile(block.path)).toString("base64");
+          blocks.push({
+            type: "image",
+            source: { type: "base64", media_type: block.mediaType, data },
+          });
+        } catch {
+          blocks.push({ type: "text", text: `[图片不可用: ${block.path}]` });
+        }
+      }
       append("user", {
         type: "tool_result",
         tool_use_id: message.toolCallId,
-        content: [{ type: "text", text: toolContentText(message.content) }],
+        content: blocks,
         is_error: message.isError,
       });
     }

@@ -230,4 +230,91 @@ describe("streamAnthropic", () => {
     expect(content).toContainEqual({ type: "text", text: `[图片不可用: ${missing}]` });
     expect(content).toContainEqual({ type: "text", text: "analyze" });
   });
+
+  it("sends image blocks inside tool_result", async () => {
+    process.env["FAKE_ANTHROPIC_KEY"] = "test";
+    const dir = await mkdtemp(join(tmpdir(), "cletus-tool-img-"));
+    const imgPath = join(dir, "shot.png");
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    await writeFile(imgPath, bytes);
+    let body: { messages: Array<Record<string, unknown>> } | undefined;
+    const port = await listen((req, res) => {
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        body = JSON.parse(raw) as { messages: Array<Record<string, unknown>> };
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.end('data: {"type":"message_stop"}\n\n');
+      });
+    });
+    await collect(
+      streamAnthropic(
+        { ...model, baseUrl: `http://127.0.0.1:${port}` },
+        {
+          systemPrompt: "s",
+          tools: [],
+          messages: [
+            {
+              role: "toolResult",
+              toolCallId: "call_1",
+              toolName: "read",
+              content: [
+                { type: "text", text: "shot.png \u2014 image/png" },
+                { type: "image", mediaType: "image/png", path: imgPath },
+              ],
+              isError: false,
+              timestamp: 1,
+            },
+          ],
+        },
+        { apiKey: "test" },
+      ),
+    );
+    const blocks = body?.messages[0]?.["content"] as unknown[];
+    expect(blocks[0]).toMatchObject({ type: "tool_result", tool_use_id: "call_1" });
+    const inner = (blocks[0] as { content: unknown[] }).content;
+    expect(inner[0]).toEqual({ type: "text", text: "shot.png \u2014 image/png" });
+    expect(inner[1]).toEqual({
+      type: "image",
+      source: { type: "base64", media_type: "image/png", data: bytes.toString("base64") },
+    });
+  });
+
+  it("degrades a missing tool_result image to a text placeholder", async () => {
+    process.env["FAKE_ANTHROPIC_KEY"] = "test";
+    const missing = join(tmpdir(), "cletus-tool-img-missing", "gone.png");
+    let body: { messages: Array<Record<string, unknown>> } | undefined;
+    const port = await listen((req, res) => {
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        body = JSON.parse(raw) as { messages: Array<Record<string, unknown>> };
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.end('data: {"type":"message_stop"}\n\n');
+      });
+    });
+    await collect(
+      streamAnthropic(
+        { ...model, baseUrl: `http://127.0.0.1:${port}` },
+        {
+          systemPrompt: "s",
+          tools: [],
+          messages: [
+            {
+              role: "toolResult",
+              toolCallId: "call_1",
+              toolName: "read",
+              content: [{ type: "image", mediaType: "image/png", path: missing }],
+              isError: false,
+              timestamp: 1,
+            },
+          ],
+        },
+        { apiKey: "test" },
+      ),
+    );
+    const blocks = body?.messages[0]?.["content"] as unknown[];
+    const inner = (blocks[0] as { content: unknown[] }).content;
+    expect(inner).toEqual([{ type: "text", text: `[\u56fe\u7247\u4e0d\u53ef\u7528: ${missing}]` }]);
+  });
 });
