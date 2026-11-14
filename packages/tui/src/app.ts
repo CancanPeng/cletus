@@ -29,11 +29,18 @@ export type ManagedItem = {
   states: string[];
 };
 
-export type ManagedAction = {
-  key: string;
-  label: string;
-  run: () => void;
+export type ManagedResult = { id: string; label: string };
+
+export type ManagedListTab = {
+  kind: "list";
+  id: string;
+  title: string;
+  items: ManagedItem[];
+  onCycle: (id: string, state: string) => Promise<void> | void;
+  refresh?: () => Promise<ManagedItem[]>;
 };
+
+export type ManagedTab = ManagedListTab;
 
 export type SlashCommand = {
   name: string;
@@ -164,11 +171,15 @@ export class TuiApp {
   private manager:
     | {
         title: string;
-        items: ManagedItem[];
+        tabs: ManagedTab[];
+        tabIndex: number;
         index: number;
+        query: string;
         resolve: () => void;
-        onCycle: (id: string, state: string) => Promise<void> | void;
-        actions: ManagedAction[];
+        box: BoxRenderable | undefined;
+        headerRow: TextRenderable | undefined;
+        tabRow: TextRenderable | undefined;
+        bodyBox: BoxRenderable | undefined;
       }
     | undefined;
   private inputModal:
@@ -179,7 +190,6 @@ export class TuiApp {
         resolve: (value: string | undefined) => void;
       }
     | undefined;
-  private managerBox: BoxRenderable | undefined;
   private syntaxStyle: SyntaxStyle | undefined;
   private theme: Theme;
   private header: string;
@@ -475,9 +485,9 @@ export class TuiApp {
       this.completionBox.backgroundColor = theme.background;
       this.completionBox.borderColor = theme.colors.border;
     }
-    if (this.managerBox) {
-      this.managerBox.backgroundColor = theme.background;
-      this.managerBox.borderColor = theme.colors.accent;
+    if (this.manager?.box) {
+      this.manager.box.backgroundColor = theme.background;
+      this.manager.box.borderColor = theme.colors.accent;
     }
     if (this.inputModal) {
       this.inputModal.box.backgroundColor = theme.background;
@@ -519,22 +529,39 @@ export class TuiApp {
     this.scrollbox?.scrollTo(0);
   }
 
-  manageItems(
-    title: string,
-    items: ManagedItem[],
-    onCycle: (id: string, state: string) => Promise<void> | void,
-    actions: ManagedAction[] = [],
-  ): Promise<void> {
+  private static filterItems(items: ManagedItem[], query: string): ManagedItem[] {
+    if (!query) return items;
+    const needle = query.toLowerCase();
+    return items.filter((item) => item.id.toLowerCase().includes(needle));
+  }
+
+  private managerItems(): ManagedItem[] {
+    const manager = this.manager;
+    const tab = manager?.tabs[manager.tabIndex];
+    return tab && tab.kind === "list" ? tab.items : [];
+  }
+
+  private visibleManagerItems(): ManagedItem[] {
+    const manager = this.manager;
+    if (!manager) return [];
+    return TuiApp.filterItems(this.managerItems(), manager.query);
+  }
+
+  manageTabs(title: string, tabs: ManagedTab[]): Promise<void> {
     this.hideCompletion();
-    this.manager?.resolve();
+    if (this.manager) this.destroyManager();
     const state = Promise.withResolvers<void>();
     this.manager = {
       title,
-      items: items.map((item) => ({ ...item })),
+      tabs,
+      tabIndex: 0,
       index: 0,
+      query: "",
       resolve: state.resolve,
-      onCycle,
-      actions,
+      box: undefined,
+      headerRow: undefined,
+      tabRow: undefined,
+      bodyBox: undefined,
     };
     this.renderManager();
     return state.promise;
@@ -1277,8 +1304,8 @@ export class TuiApp {
     const bindings = this.options.keybindings;
     if (this.inputModal) return "enter confirm · esc cancel";
     if (this.manager) {
-      const actions = this.manager.actions.map((action) => `${action.key} ${action.label}`).join(" · ");
-      return `↑↓ move · space cycle${actions ? ` · ${actions}` : ""} · enter/esc close`;
+      const actions = "type filter · ↑↓ move · space cycle · enter/esc close";
+      return actions;
     }
     if (this.modal) {
       return `${bindings.get("modalAllow")[0]} allow · ${bindings.get("modalSession")[0]} session · ${bindings.get("modalDeny")[0]} deny`;
@@ -1308,48 +1335,71 @@ export class TuiApp {
     this.intercept(key);
     const manager = this.manager;
     if (!manager) return;
-    if (key.name === "escape" || key.name === "return") {
+    const tab = manager.tabs[manager.tabIndex];
+    if (!tab || tab.kind !== "list") return;
+    if (key.name === "return") {
       this.closeManager();
       return;
     }
-    const action = manager.actions.find(
-      (candidate) =>
-        candidate.key === key.name && !key.ctrl && !key.meta && !key.option && !key.super,
-    );
-    if (action) {
+    if (key.name === "escape") {
+      if (manager.query) {
+        manager.query = "";
+        manager.index = 0;
+        this.renderManager();
+        return;
+      }
       this.closeManager();
-      action.run();
       return;
     }
+    const visible = this.visibleManagerItems();
     if (key.name === "up") {
       manager.index = Math.max(0, manager.index - 1);
       this.renderManager();
       return;
     }
     if (key.name === "down") {
-      manager.index = Math.min(manager.items.length - 1, manager.index + 1);
+      manager.index = Math.max(0, Math.min(visible.length - 1, manager.index + 1));
+      this.renderManager();
+      return;
+    }
+    if (key.name === "backspace") {
+      if (!manager.query) return;
+      manager.query = manager.query.slice(0, -1);
+      manager.index = 0;
       this.renderManager();
       return;
     }
     if (key.name === "space") {
-      const item = manager.items[manager.index];
+      const item = visible[manager.index];
       if (!item || item.states.length === 0) return;
       const index = item.states.indexOf(item.state);
       item.state = item.states[(index + 1) % item.states.length] ?? item.states[0] ?? item.state;
       this.renderManager();
-      void Promise.resolve(manager.onCycle(item.id, item.state)).catch((error: unknown) => {
+      void Promise.resolve(tab.onCycle(item.id, item.state)).catch((error: unknown) => {
         this.notify(error instanceof Error ? error.message : String(error), "error");
       });
+      return;
+    }
+    if (!key.ctrl && !key.meta && !key.option && !key.super) {
+      const typed = key.sequence;
+      if (!typed || typed.length !== 1) return;
+      manager.query += typed;
+      manager.index = 0;
+      this.renderManager();
     }
   }
 
-  private closeManager(): void {
+  private destroyManager(): void {
     const manager = this.manager;
     if (!manager) return;
     this.manager = undefined;
-    this.managerBox?.destroyRecursively();
-    this.managerBox = undefined;
+    manager.box?.destroyRecursively();
     manager.resolve();
+  }
+
+  private closeManager(): void {
+    if (!this.manager) return;
+    this.destroyManager();
     this.textarea?.focus();
     this.updateFooter();
   }
@@ -1366,65 +1416,120 @@ export class TuiApp {
 
   private renderManager(): void {
     if (!this.renderer || !this.root || !this.manager) return;
-    this.managerBox?.destroyRecursively();
-    this.textarea?.blur();
     const manager = this.manager;
-    const visible = Math.min(10, manager.items.length);
-    const box = new BoxRenderable(this.renderer, {
-      id: "skills-manager",
-      position: "absolute",
-      top: "16%",
-      left: "10%",
-      width: "80%",
-      height: visible + 5,
-      border: true,
-      borderStyle: "rounded",
-      borderColor: this.color("accent"),
-      backgroundColor: this.theme.background,
-      paddingX: 1,
-      flexDirection: "column",
-      zIndex: 110,
-    });
-    box.add(
-      new TextRenderable(this.renderer, {
-        content: manager.title,
+    this.textarea?.blur();
+    if (!manager.box) {
+      const box = new BoxRenderable(this.renderer, {
+        id: "skills-manager",
+        position: "absolute",
+        top: "12%",
+        left: "8%",
+        width: "84%",
+        border: true,
+        borderStyle: "rounded",
+        borderColor: this.color("accent"),
+        backgroundColor: this.theme.background,
+        paddingX: 1,
+        flexDirection: "column",
+        zIndex: 110,
+      });
+      const headerRow = new TextRenderable(this.renderer, {
+        content: "",
         fg: this.color("accent"),
         wrapMode: "none",
         truncate: true,
         width: "100%",
-      }),
-    );
-    const start = Math.max(0, Math.min(manager.index - 4, manager.items.length - visible));
-    for (let rowIndex = 0; rowIndex < visible; rowIndex += 1) {
-      const item = manager.items[start + rowIndex];
-      if (!item) continue;
-      const selected = start + rowIndex === manager.index;
-      const row = new TextRenderable(this.renderer, {
-        content: `${selected ? "› " : "  "}[${item.state}] ${item.label}`,
-        fg: selected ? this.color("accent") : this.color("fg"),
-        wrapMode: "none",
-        truncate: true,
-        width: "100%",
       });
-      box.add(row);
-    }
-    const actionHint = manager.actions
-      .map((action) => `${action.key} ${action.label}`)
-      .join(" · ");
-    box.add(
-      new TextRenderable(this.renderer, {
-        content: `Space cycle${actionHint ? ` · ${actionHint}` : ""} · Enter/Esc close`,
+      const tabRow = new TextRenderable(this.renderer, {
+        content: "",
         fg: this.color("muted"),
         wrapMode: "none",
         truncate: true,
         width: "100%",
-        marginTop: 1,
-      }),
-    );
-    this.root.add(box);
-    this.managerBox = box;
+      });
+      const bodyBox = new BoxRenderable(this.renderer, {
+        id: "skills-manager-body",
+        width: "100%",
+        flexDirection: "column",
+        flexShrink: 0,
+      });
+      box.add(headerRow);
+      box.add(tabRow);
+      box.add(bodyBox);
+      this.root.add(box);
+      manager.box = box;
+      manager.headerRow = headerRow;
+      manager.tabRow = tabRow;
+      manager.bodyBox = bodyBox;
+    }
+    this.syncManagerShell();
+    this.renderManagerBody();
     this.updateFooter();
     this.renderer.requestRender();
+  }
+
+  private syncManagerShell(): void {
+    const manager = this.manager;
+    if (!manager || !manager.box || !manager.headerRow || !manager.tabRow) return;
+    const tab = manager.tabs[manager.tabIndex];
+    const visible = this.visibleManagerItems();
+    const total = this.managerItems().length;
+    const counts =
+      tab?.kind === "list" && total > 0 ? `${manager.title}  ${visible.length}/${total}` : manager.title;
+    manager.headerRow.content = manager.query ? `${counts}  /${manager.query}` : counts;
+    manager.tabRow.content = manager.tabs
+      .map((candidate, index) =>
+        index === manager.tabIndex ? `[${candidate.title}]` : ` ${candidate.title} `,
+      )
+      .join(" ");
+    const rows = Math.min(8, Math.max(visible.length, 1));
+    manager.box.height = rows + 6;
+  }
+
+  private renderManagerBody(): void {
+    const manager = this.manager;
+    if (!manager?.bodyBox || !this.renderer) return;
+    const body = manager.bodyBox;
+    for (const child of [...body.getChildren()]) child.destroyRecursively();
+    const tab = manager.tabs[manager.tabIndex];
+    if (!tab || tab.kind !== "list") return;
+    const visible = this.visibleManagerItems();
+    const rows = Math.min(8, Math.max(visible.length, 1));
+    if (visible.length === 0) {
+      body.add(
+        new TextRenderable(this.renderer, {
+          content: "no matches",
+          fg: this.color("muted"),
+          wrapMode: "none",
+          truncate: true,
+          width: "100%",
+        }),
+      );
+    }
+    const start = Math.max(0, Math.min(manager.index - 3, visible.length - rows));
+    for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
+      const item = visible[start + rowIndex];
+      if (!item) continue;
+      const selected = start + rowIndex === manager.index;
+      body.add(
+        new TextRenderable(this.renderer, {
+          content: `${selected ? "› " : "  "}[${item.state}] ${item.label}`,
+          fg: selected ? this.color("accent") : this.color("fg"),
+          wrapMode: "none",
+          truncate: true,
+          width: "100%",
+        }),
+      );
+    }
+    body.add(
+      new TextRenderable(this.renderer, {
+        content: "type to filter · space cycle · enter/esc close",
+        fg: this.color("muted"),
+        wrapMode: "none",
+        truncate: true,
+        width: "100%",
+      }),
+    );
   }
 
   private getClipboard(): ClipboardService | undefined {

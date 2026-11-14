@@ -312,30 +312,72 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
-  it("manages list states in a popup", async () => {
+  it("filters managed items by typed letters and still cycles state", async () => {
     const ctx = await setupApp();
     const changes: Array<[string, string]> = [];
-    const done = ctx.app.manageItems(
-      "Skills",
-      [{ id: "review", label: "review · personal", state: "on", states: ["on", "off"] }],
-      (id, state) => {
-        changes.push([id, state]);
+    const done = ctx.app.manageTabs("Skills", [
+      {
+        kind: "list",
+        id: "skills",
+        title: "Skills",
+        items: [
+          { id: "review", label: "review · personal", state: "on", states: ["on", "off"] },
+          { id: "pdf", label: "pdf · personal", state: "on", states: ["on", "off"] },
+          { id: "PDFKit", label: "PDFKit · personal", state: "on", states: ["on", "off"] },
+        ],
+        onCycle: (id, state) => {
+          changes.push([id, state]);
+        },
       },
-    );
+    ]);
     await ctx.flush();
     expect(ctx.captureCharFrame()).toContain("[on] review");
+
+    ctx.mockInput.typeText("PDF");
+    await ctx.flush();
+    const filtered = ctx.captureCharFrame();
+    expect(filtered).toContain("/PDF");
+    expect(filtered).toContain("[on] PDFKit");
+    expect(filtered).not.toContain("review");
+
+    ctx.mockInput.pressBackspace();
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("/PD");
+
+    ctx.mockInput.typeText("F");
+    await ctx.flush();
+    ctx.mockInput.pressArrow("down");
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("› [on] PDFKit");
+
     ctx.mockInput.typeText(" ");
     await ctx.flush();
-    expect(changes).toEqual([["review", "off"]]);
-    expect(ctx.captureCharFrame()).toContain("[off] review");
+    expect(changes).toEqual([["PDFKit", "off"]]);
+
+    ctx.mockInput.typeText("zzz");
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("no matches");
+    expect(ctx.captureCharFrame()).toContain("0/3");
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
     ctx.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await ctx.flush();
+    const cleared = ctx.captureCharFrame();
+    expect(cleared).toContain("3/3");
+    expect(cleared).not.toContain("/zzz");
+    expect(cleared).toContain("[on] review");
+    expect(cleared).toContain("[off] PDFKit");
+
+    ctx.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 60));
     await ctx.flush();
     await expect(done).resolves.toBeUndefined();
     ctx.app.stop();
     await ctx.dispose();
   });
 
-  it("collects input and runs manager actions", async () => {
+  it("collects input from the prompt modal", async () => {
     const ctx = await setupApp();
     const input = ctx.app.promptInput("Search skills", "query");
     await ctx.flush();
@@ -343,20 +385,20 @@ describe("TuiApp", () => {
     ctx.mockInput.pressEnter();
     await ctx.flush();
     await expect(input).resolves.toBe("pdf");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
 
-    let searches = 0;
-    const manager = ctx.app.manageItems(
-      "Skills",
-      [],
-      () => undefined,
-      [{ key: "s", label: "search", run: () => { searches += 1; } }],
-    );
+  it("closes the manager with Escape", async () => {
+    const ctx = await setupApp();
+    const manager = ctx.app.manageTabs("Skills", [
+      { kind: "list", id: "skills", title: "Skills", items: [], onCycle: () => undefined },
+    ]);
     await ctx.flush();
-    expect(ctx.captureCharFrame()).toContain("s search");
-    ctx.mockInput.typeText("s");
+    expect(ctx.captureCharFrame()).toContain("[Skills]");
+    ctx.mockInput.pressEscape();
     await ctx.flush();
     await expect(manager).resolves.toBeUndefined();
-    expect(searches).toBe(1);
     ctx.app.stop();
     await ctx.dispose();
   });
