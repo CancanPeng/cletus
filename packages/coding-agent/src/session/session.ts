@@ -21,6 +21,7 @@ import { createSubagentRunner } from "../subagent.js";
 import { createTaskTool } from "../tools/task.js";
 import { SessionManager } from "./manager.js";
 import { buildProjection } from "./context.js";
+import { summarizeUsage, type UsageStats } from "./usage.js";
 import { compact, shouldCompact } from "./compaction.js";
 import type { McpManager } from "../mcp/manager.js";
 import type { ExtensionHost } from "../extensions/host.js";
@@ -372,6 +373,17 @@ export class AgentSession {
     this.resources = await this.options.resources.load();
     this.options.permissions.setReadOnlyRoots(this.resources.readOnlyRoots);
     this.refreshTools();
+  }
+
+  /**
+   * Cumulative token usage over the whole session branch — not the current
+   * projection, so calls summarized away by compaction still count.
+   */
+  getUsageStats(): UsageStats {
+    const messages = this.manager
+      .getBranch()
+      .flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
+    return summarizeUsage(messages);
   }
 
   getContextUsage(): { used: number; window: number } {

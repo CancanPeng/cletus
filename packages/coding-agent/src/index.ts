@@ -3,6 +3,7 @@ export * from "./config/import-pi.js";
 export * from "./session/types.js";
 export * from "./session/manager.js";
 export * from "./session/context.js";
+export * from "./session/usage.js";
 export { compact, selectCut, shouldCompact, COMPACTION_SYSTEM_PROMPT } from "./session/compaction.js";
 export type { CompactionResult } from "./session/compaction.js";
 export * from "./session/session.js";

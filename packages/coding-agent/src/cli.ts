@@ -35,6 +35,7 @@ import { runFork } from "./session/fork.js";
 import { headerFor } from "./session/header.js";
 import { projectionBlocks } from "./session/transcript.js";
 import { sessionLabel } from "./session/label.js";
+import { contextReport, shortTokens } from "./session/usage.js";
 import { expandTemplate } from "./resources/prompts.js";
 
 declare const __CLETUS_VERSION__: string | undefined;
@@ -49,6 +50,7 @@ const BUILTIN_COMMANDS = [
   "resume",
   "fork",
   "compact",
+  "context",
   "model",
   "theme",
   "symbols",
@@ -168,13 +170,6 @@ async function gitBranch(cwd: string): Promise<string | undefined> {
   } catch {
     return undefined;
   }
-}
-
-function shortTokens(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
-  if (value >= 10_000) return `${Math.round(value / 1000)}k`;
-  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
-  return String(value);
 }
 
 function formatDuration(ms: number): string {
@@ -540,6 +535,14 @@ async function runTui(opts: {
         }
         await session.compact(args || undefined);
         app?.notify("Compaction complete");
+      },
+    },
+    {
+      name: "context",
+      description: "Show context usage and cache hit stats",
+      run: () => {
+        if (!session) return;
+        app?.notify(contextReport(session.getContextUsage(), session.getUsageStats()));
       },
     },
     {

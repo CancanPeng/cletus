@@ -137,7 +137,9 @@ Configure in `~/.cletus/config.json`:
 
 Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a command. `Enter` on a complete command such as `/quit` runs it immediately.
 
-`/help`, `/quit`, `/new`, `/resume`, `/fork`, `/compact`, `/model`, `/theme`, `/symbols`, `/keys`, `/skills`, `/permissions`, `/yolo`, `/verbose`, `/thinking`, `/mcp`, `/reload`, plus each user-invocable skill by its own name (for example `/using-git-worktrees`) and prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
+`/help`, `/quit`, `/new`, `/resume`, `/fork`, `/compact`, `/context`, `/model`, `/theme`, `/symbols`, `/keys`, `/skills`, `/permissions`, `/yolo`, `/verbose`, `/thinking`, `/mcp`, `/reload`, plus each user-invocable skill by its own name (for example `/using-git-worktrees`) and prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
+
+`/context` reports the current session: context window usage, cumulative input/output/total tokens across all model calls (including compacted history), and prompt-cache stats — hit (cache read), miss (uncached input), write, and hit rate. OpenAI-style usage where cached tokens are included in the input count is normalized so hits are never double-counted.
 
 ## Sessions
 
