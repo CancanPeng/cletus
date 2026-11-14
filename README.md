@@ -145,12 +145,13 @@ The picker lists the current position first, then each of your messages newest f
 Forking is refused while the agent is running.
 ## Skills
 
-`/skills` opens a single popup manager inspired by Claude Code. Use Up/Down to move, `Space` to cycle visibility, and `Enter` or `Esc` to close. Changes are saved immediately to `~/.cletus/config.json`.
+`/skills` opens a tabbed popup manager (`Skills`, `Search`, `Install`). `Tab` / `Shift+Tab` switch tabs. Changes are saved immediately to `~/.cletus/config.json`.
 
-From the same popup:
-
-- `s` searches skills.sh and installs a selected result
-- `i` installs `owner/repo#skill` from GitHub
+| Tab | Keys |
+|---|---|
+| `Skills` | type to filter, `Backspace` to erase, `Up`/`Down` to move, `Space` to cycle visibility, `Esc` clears the filter first, then closes; the filter survives a trip to another tab |
+| `Search` | type a query; skills.sh is searched as you type, `Up`/`Down` pick a result, `Enter` installs, `Esc` goes back to `Skills` |
+| `Install` | type `owner/repo#skill`, `Enter` installs, `Esc` goes back to `Skills` |
 
 Installation downloads the skill directory through the GitHub API into `~/.claude/skills/<skill>` after confirmation, then reloads the skill list and slash commands.
 
