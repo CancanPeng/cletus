@@ -191,6 +191,7 @@ export class TuiApp {
         tabs: ManagedTab[];
         tabIndex: number;
         index: number;
+        filter: string;
         query: string;
         input: InputRenderable | undefined;
         inputBox: BoxRenderable | undefined;
@@ -570,7 +571,7 @@ export class TuiApp {
   private visibleManagerItems(): ManagedItem[] {
     const manager = this.manager;
     if (!manager) return [];
-    return TuiApp.filterItems(this.managerItems(), manager.query);
+    return TuiApp.filterItems(this.managerItems(), manager.filter);
   }
 
   manageTabs(title: string, tabs: ManagedTab[]): Promise<void> {
@@ -582,6 +583,7 @@ export class TuiApp {
       tabs,
       tabIndex: 0,
       index: 0,
+      filter: "",
       query: "",
       input: undefined,
       inputBox: undefined,
@@ -1019,16 +1021,19 @@ export class TuiApp {
       }
       return;
     }
-    if (this.manager) {
-      this.handleManagerKey(key);
-      return;
-    }
+    // Modals and selects are asked for *by* the manager (install confirms),
+    // so they sit above it: route keys to them first or the popup eats the
+    // answer.
     if (this.modal) {
       this.handleModalKey(key);
       return;
     }
     if (this.selectState) {
       this.handleSelectKey(key);
+      return;
+    }
+    if (this.manager) {
+      this.handleManagerKey(key);
       return;
     }
     if (bindings.matches(key, "copy")) {
@@ -1375,18 +1380,10 @@ export class TuiApp {
         ? (manager.tabIndex - 1 + manager.tabs.length) % manager.tabs.length
         : (manager.tabIndex + 1) % manager.tabs.length;
       this.clearManagerSearch();
-      manager.query = "";
       manager.index = 0;
       manager.resultIndex = 0;
       this.renderManager();
-      const nextTab = manager.tabs[manager.tabIndex];
-      if (nextTab?.kind === "list" && nextTab.refresh) {
-        void nextTab.refresh().then((items) => {
-          if (this.manager !== manager) return;
-          nextTab.items = items;
-          this.renderManager();
-        });
-      }
+      this.refreshManagerList();
       return;
     }
     const tab = manager.tabs[manager.tabIndex];
@@ -1409,8 +1406,8 @@ export class TuiApp {
       return;
     }
     if (key.name === "escape") {
-      if (manager.query) {
-        manager.query = "";
+      if (manager.filter) {
+        manager.filter = "";
         manager.index = 0;
         this.renderManager();
         return;
@@ -1430,8 +1427,8 @@ export class TuiApp {
       return;
     }
     if (key.name === "backspace") {
-      if (!manager.query) return;
-      manager.query = manager.query.slice(0, -1);
+      if (!manager.filter) return;
+      manager.filter = manager.filter.slice(0, -1);
       manager.index = 0;
       this.renderManager();
       return;
@@ -1450,7 +1447,7 @@ export class TuiApp {
     if (!key.ctrl && !key.meta && !key.option && !key.super) {
       const typed = key.sequence;
       if (!typed || typed.length !== 1) return;
-      manager.query += typed;
+      manager.filter += typed;
       manager.index = 0;
       this.renderManager();
     }
@@ -1469,6 +1466,18 @@ export class TuiApp {
     manager.input = undefined;
     manager.box?.destroyRecursively();
     manager.resolve();
+  }
+
+  /** Reload the list tab's items, if it knows how. Keeps the popup open. */
+  private refreshManagerList(): void {
+    const manager = this.manager;
+    const tab = manager?.tabs[manager.tabIndex];
+    if (!manager || tab?.kind !== "list" || !tab.refresh) return;
+    void tab.refresh().then((items) => {
+      if (this.manager !== manager) return;
+      tab.items = items;
+      this.renderManager();
+    });
   }
 
   private clearManagerSearch(): void {
@@ -1494,10 +1503,10 @@ export class TuiApp {
       }
       manager.tabIndex = back;
       this.clearManagerSearch();
-      manager.query = "";
       manager.index = 0;
       manager.resultIndex = 0;
       this.renderManager();
+      this.refreshManagerList();
       return;
     }
     if (tab.kind === "search" && (key.name === "up" || key.name === "down")) {
@@ -1693,7 +1702,8 @@ export class TuiApp {
     const total = this.managerItems().length;
     const counts =
       tab?.kind === "list" && total > 0 ? `${manager.title}  ${visible.length}/${total}` : manager.title;
-    manager.headerRow.content = manager.query ? `${counts}  /${manager.query}` : counts;
+    const active = tab?.kind === "list" ? manager.filter : manager.query;
+    manager.headerRow.content = active ? `${counts}  /${active}` : counts;
     manager.tabRow.content = manager.tabs
       .map((candidate, index) =>
         index === manager.tabIndex ? `[${candidate.title}]` : ` ${candidate.title} `,
@@ -1892,14 +1902,21 @@ export class TuiApp {
     this.modalBox?.destroyRecursively();
     this.modalBox = undefined;
     modal?.resolve(decision);
-    this.textarea?.focus();
+    this.restoreFocus();
     this.updateFooter();
+  }
+
+  /** Focus the manager's input when it is still open, otherwise the editor. */
+  private restoreFocus(): void {
+    if (this.manager?.input) this.manager.input.focus();
+    else this.textarea?.focus();
   }
 
   private renderModal(): void {
     if (!this.renderer || !this.root || !this.modal) return;
     this.modalBox?.destroyRecursively();
     this.textarea?.blur();
+    this.manager?.input?.blur();
     const box = new BoxRenderable(this.renderer, {
       id: "permission-modal",
       position: "absolute",
@@ -1913,7 +1930,7 @@ export class TuiApp {
       backgroundColor: this.theme.background,
       padding: 1,
       flexDirection: "column",
-      zIndex: 100,
+      zIndex: 130,
     });
     box.add(
       new TextRenderable(this.renderer, {
@@ -1956,7 +1973,7 @@ export class TuiApp {
     this.selectBox?.destroyRecursively();
     this.selectBox = undefined;
     state.resolve(value);
-    this.textarea?.focus();
+    this.restoreFocus();
     this.updateFooter();
   }
 
@@ -1996,7 +2013,7 @@ export class TuiApp {
       backgroundColor: this.theme.background,
       padding: 1,
       flexDirection: "column",
-      zIndex: 100,
+      zIndex: 130,
     });
     box.add(
       new TextRenderable(this.renderer, {

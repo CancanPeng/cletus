@@ -70,11 +70,19 @@ describe("skills tabs", () => {
     await test.flush();
     expect(installed.at(-1)).toBe("owner/repo#skill");
 
-    // Esc goes back to Skills, Esc again closes.
+    // Esc goes back to Skills, keeping the filter that was set there.
     await new Promise((r) => setTimeout(r, 60));
     test.mockInput.pressEscape();
     await new Promise((r) => setTimeout(r, 60));
     await test.flush();
+    frame = test.captureCharFrame();
+    expect(frame).toContain("[Skills]");
+    expect(frame).toContain("/pdf");
+    // Next Esc clears the filter, and only then does Esc close.
+    test.mockInput.pressEscape();
+    await new Promise((r) => setTimeout(r, 60));
+    await test.flush();
+    expect(test.captureCharFrame()).not.toContain("/pdf");
     expect(test.captureCharFrame()).toContain("[Skills]");
     test.mockInput.pressEscape();
     await new Promise((r) => setTimeout(r, 60));

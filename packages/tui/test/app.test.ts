@@ -815,4 +815,227 @@ describe("TuiApp", () => {
     ctx.app.stop();
     await ctx.dispose();
   });
+
+  it("answers a confirm opened from a manager tab", async () => {
+    const ctx = await setupApp();
+    let decision: string | undefined;
+    const done = ctx.app.manageTabs("Skills", [
+      {
+        kind: "search",
+        id: "search",
+        title: "Search",
+        placeholder: "query",
+        search: async () => [{ id: "a/b/c", label: "c · a/b" }],
+        onAccept: async () => {
+          decision = await ctx.app.confirm("Install skill", "a/b · c\n\nInstall globally?");
+        },
+      },
+    ]);
+    await ctx.flush();
+    await ctx.mockInput.typeText("c");
+    await ctx.flush();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await ctx.flush();
+    ctx.resize(120, 58);
+    await ctx.flush();
+    ctx.mockInput.pressEnter();
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("[y] allow once");
+
+    ctx.mockInput.pressKey("y");
+    await ctx.flush();
+    expect(decision).toBe("allow");
+    expect(ctx.captureCharFrame()).not.toContain("[y] allow once");
+    // The popup survives the confirm and is still usable.
+    expect(ctx.captureCharFrame()).toContain("[Search]");
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    ctx.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await ctx.flush();
+    await expect(done).resolves.toBeUndefined();
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
+  it("denies a confirm opened from a manager tab without losing the popup", async () => {
+    const ctx = await setupApp();
+    let decision: string | undefined;
+    const done = ctx.app.manageTabs("Skills", [
+      {
+        kind: "search",
+        id: "search",
+        title: "Search",
+        placeholder: "query",
+        search: async () => [{ id: "a/b/c", label: "c · a/b" }],
+        onAccept: async () => {
+          decision = await ctx.app.confirm("Install skill", "a/b · c");
+        },
+      },
+    ]);
+    await ctx.flush();
+    ctx.mockInput.typeText("c");
+    await ctx.flush();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await ctx.flush();
+    ctx.mockInput.pressEnter();
+    await ctx.flush();
+    ctx.mockInput.pressKey("n");
+    await ctx.flush();
+    expect(decision).toBe("deny");
+    expect(ctx.captureCharFrame()).toContain("[Search]");
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    ctx.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await ctx.flush();
+    await expect(done).resolves.toBeUndefined();
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
+  it("refreshes the list tab when returning to it", async () => {
+    const ctx = await setupApp();
+    let refreshes = 0;
+    const done = ctx.app.manageTabs("Skills", [
+      {
+        kind: "list",
+        id: "skills",
+        title: "Skills",
+        items: [{ id: "review", label: "review · personal", state: "on", states: ["on", "off"] }],
+        refresh: async () => {
+          refreshes += 1;
+          return [
+            { id: "review", label: "review · personal", state: "on", states: ["on", "off"] },
+            { id: "fresh", label: "fresh · personal", state: "on", states: ["on", "off"] },
+          ];
+        },
+        onCycle: () => undefined,
+      },
+      {
+        kind: "prompt",
+        id: "install",
+        title: "Install",
+        placeholder: "owner/repo#skill",
+        onSubmit: () => undefined,
+      },
+    ]);
+    await ctx.flush();
+    ctx.mockInput.pressTab();
+    await ctx.flush();
+    ctx.mockInput.pressTab();
+    await ctx.flush();
+    const refreshed = ctx.waitFor(() => ctx.captureCharFrame().includes("fresh · personal"));
+    await refreshed;
+    expect(refreshes).toBe(1);
+    expect(ctx.captureCharFrame()).toContain("2/2");
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    ctx.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await ctx.flush();
+    await expect(done).resolves.toBeUndefined();
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
+  it("refreshes the list when Escape returns to it", async () => {
+    const ctx = await setupApp();
+    let refreshes = 0;
+    const base = [{ id: "review", label: "review · personal", state: "on", states: ["on", "off"] }];
+    const done = ctx.app.manageTabs("Skills", [
+      {
+        kind: "list",
+        id: "skills",
+        title: "Skills",
+        items: base,
+        refresh: async () => {
+          refreshes += 1;
+          return [...base, { id: "fresh", label: "fresh · personal", state: "on", states: ["on", "off"] }];
+        },
+        onCycle: () => undefined,
+      },
+      {
+        kind: "search",
+        id: "search",
+        title: "Search",
+        placeholder: "query",
+        search: async () => [],
+        onAccept: () => undefined,
+      },
+    ]);
+    await ctx.flush();
+    ctx.mockInput.pressTab();
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("[Search]");
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    ctx.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await ctx.waitFor(() => ctx.captureCharFrame().includes("fresh · personal"));
+    expect(refreshes).toBe(1);
+    expect(ctx.captureCharFrame()).toContain("[Skills]");
+
+    ctx.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await ctx.flush();
+    await expect(done).resolves.toBeUndefined();
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
+  it("keeps the list filter across a tab round trip", async () => {
+    const ctx = await setupApp();
+    const done = ctx.app.manageTabs("Skills", [
+      {
+        kind: "list",
+        id: "skills",
+        title: "Skills",
+        items: [
+          { id: "review", label: "review · personal", state: "on", states: ["on", "off"] },
+          { id: "pdf", label: "pdf · personal", state: "on", states: ["on", "off"] },
+        ],
+        onCycle: () => undefined,
+      },
+      {
+        kind: "prompt",
+        id: "install",
+        title: "Install",
+        placeholder: "owner/repo#skill",
+        onSubmit: () => undefined,
+      },
+    ]);
+    await ctx.flush();
+    await ctx.mockInput.typeText("pdf");
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("/pdf");
+    expect(ctx.captureCharFrame()).toContain("1/2");
+
+    ctx.mockInput.pressTab();
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).toContain("[Install]");
+
+    ctx.mockInput.pressTab();
+    await ctx.flush();
+    const frame = ctx.captureCharFrame();
+    expect(frame).toContain("[Skills]");
+    expect(frame).toContain("/pdf");
+    expect(frame).toContain("1/2");
+    expect(frame).not.toContain("review");
+
+    ctx.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await ctx.flush();
+    // First Esc clears the filter, second closes.
+    const cleared = ctx.captureCharFrame();
+    expect(cleared).toContain("2/2");
+    expect(cleared).not.toContain("/pdf");
+
+    ctx.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await ctx.flush();
+    await expect(done).resolves.toBeUndefined();
+    ctx.app.stop();
+    await ctx.dispose();
+  });
 });

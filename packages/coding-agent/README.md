@@ -122,7 +122,7 @@ Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a
 
 | Tab | Keys |
 |---|---|
-| `Skills` | type to filter, `Backspace` to erase, `Up`/`Down` to move, `Space` to cycle visibility, `Esc` clears the filter first, then closes |
+| `Skills` | type to filter, `Backspace` to erase, `Up`/`Down` to move, `Space` to cycle visibility, `Esc` clears the filter first, then closes; the filter survives a trip to another tab |
 | `Search` | type a query; skills.sh is searched as you type, `Up`/`Down` pick a result, `Enter` installs, `Esc` goes back to `Skills` |
 | `Install` | type `owner/repo#skill`, `Enter` installs, `Esc` goes back to `Skills` |
 
