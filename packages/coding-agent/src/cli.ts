@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { parseArgs } from "node:util";
 import type { AgentEvent, AgentMessage } from "@cletus/agent";
 import { toolContentText, type Model } from "@cletus/ai";
-import type { TuiApp as TuiAppType, SlashCommand } from "@cletus/tui";
+import type { ManagedItem, SlashCommand, TuiApp as TuiAppType } from "@cletus/tui";
 import {
   ConfigError,
   authPath,
@@ -22,7 +22,7 @@ import {
   type SkillVisibility,
 } from "./config.js";
 import { importPi } from "./config/import-pi.js";
-import { ResourceLoader } from "./resources/index.js";
+import { ResourceLoader, type LoadedResources } from "./resources/index.js";
 import { installRegistrySkill, searchSkillRegistry, type RegistrySkill } from "./resources/skills-registry.js";
 import { ExtensionHost } from "./extensions/host.js";
 import { McpManager } from "./mcp/manager.js";
@@ -621,16 +621,17 @@ async function runTui(opts: {
           app?.notify("Cannot manage skills while running", "warn");
           return;
         }
-        const loaded = await opts.resources.load();
-        const items = loaded.skills.map((skill) => ({
-          id: skill.name,
-          label: `${skill.name} · ${skill.source} — ${skill.description}`,
-          state:
-            skill.visibility === "user-invocable-only"
-              ? "user-only"
-              : skill.visibility,
-          states: ["on", "name-only", "user-only", "off"],
-        }));
+        const toItems = (skills: LoadedResources["skills"]): ManagedItem[] =>
+          skills.map((skill) => ({
+            id: skill.name,
+            label: `${skill.name} · ${skill.source} — ${skill.description}`,
+            state: skill.visibility === "user-invocable-only" ? "user-only" : skill.visibility,
+            states: ["on", "name-only", "user-only", "off"],
+          }));
+        const loadItems = async (): Promise<ManagedItem[]> => {
+          opts.resources.reload();
+          return toItems((await opts.resources.load()).skills);
+        };
         const install = async (entry: RegistrySkill): Promise<void> => {
           const approved = await app?.confirm(
             "Install skill",
@@ -639,36 +640,10 @@ async function runTui(opts: {
           if (approved !== "allow" && approved !== "session") return;
           app?.notify(`Installing ${entry.source}/${entry.skillId}…`);
           await installRegistrySkill(entry);
-          opts.resources.reload();
-          await opts.resources.load();
           syncSkillCommands();
           app?.notify(`Installed ${entry.name}`);
         };
-        const search = async (): Promise<void> => {
-          const query = await app?.promptInput("Search skills.sh", "pdf, testing, design…");
-          if (!query) return;
-          app?.notify(`Searching skills.sh for ${query}…`);
-          const results = await searchSkillRegistry(query);
-          if (results.length === 0) {
-            app?.notify("No skills found", "warn");
-            return;
-          }
-          const choice = await app?.select(
-            "Install skill",
-            results.map((entry) => ({
-              label: `${entry.name} · ${entry.source} · ${entry.installs.toLocaleString()} installs`,
-              value: entry.id,
-            })),
-          );
-          const entry = results.find((candidate) => candidate.id === choice);
-          if (entry) await install(entry);
-        };
-        const installFromPackage = async (): Promise<void> => {
-          const value = await app?.promptInput(
-            "Install from GitHub",
-            "owner/repo#skill",
-          );
-          if (!value) return;
+        const installFromPackage = async (value: string): Promise<void> => {
           const split = value.lastIndexOf("#");
           if (split <= 0 || split === value.length - 1) {
             app?.notify("Use owner/repo#skill", "warn");
@@ -682,24 +657,51 @@ async function runTui(opts: {
             installs: 0,
           });
         };
+        const registry = new Map<string, RegistrySkill>();
         let changed = false;
         try {
-          await app?.manageItems(
-            "Skills",
-            items,
-            async (name, state) => {
-              changed = true;
-              const visibility: SkillVisibility =
-                state === "user-only" ? "user-invocable-only" : state as SkillVisibility;
-              opts.config.skillOverrides[name] = visibility;
-              await writeJsonAtomic(configPath(opts.home), opts.config);
-              opts.resources.setSkillOverrides(opts.config.skillOverrides);
+          await app?.manageTabs("Skills", [
+            {
+              kind: "list",
+              id: "skills",
+              title: "Skills",
+              items: toItems((await opts.resources.load()).skills),
+              refresh: loadItems,
+              onCycle: async (name, state) => {
+                changed = true;
+                const visibility: SkillVisibility =
+                  state === "user-only" ? "user-invocable-only" : (state as SkillVisibility);
+                opts.config.skillOverrides[name] = visibility;
+                await writeJsonAtomic(configPath(opts.home), opts.config);
+                opts.resources.setSkillOverrides(opts.config.skillOverrides);
+              },
             },
-            [
-              { key: "s", label: "search", run: () => void search() },
-              { key: "i", label: "install", run: () => void installFromPackage() },
-            ],
-          );
+            {
+              kind: "search",
+              id: "search",
+              title: "Search",
+              placeholder: "pdf, testing, design…",
+              search: async (query, signal) => {
+                const found = await searchSkillRegistry(query, signal);
+                for (const entry of found) registry.set(entry.id, entry);
+                return found.map((entry) => ({
+                  id: entry.id,
+                  label: `${entry.name} · ${entry.source} · ${entry.installs.toLocaleString()} installs`,
+                }));
+              },
+              onAccept: async (result) => {
+                const entry = registry.get(result.id);
+                if (entry) await install(entry);
+              },
+            },
+            {
+              kind: "prompt",
+              id: "install",
+              title: "Install",
+              placeholder: "owner/repo#skill",
+              onSubmit: installFromPackage,
+            },
+          ]);
         } catch (error) {
           app?.notify(error instanceof Error ? error.message : String(error), "error");
         }
