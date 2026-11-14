@@ -1,4 +1,7 @@
 import { createServer, type Server } from "node:http";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   assistantMessage,
@@ -184,5 +187,87 @@ describe("streamOpenAI", () => {
     const error = events.find((event) => event.type === "error");
     expect(error?.type).toBe("error");
     if (error?.type === "error") expect(error.error).toContain("finish reason");
+  });
+
+  it("serializes user images as image_url parts after text", async () => {
+    process.env["FAKE_KEY"] = "test";
+    const dir = await mkdtemp(join(tmpdir(), "cletus-img-"));
+    const imgPath = join(dir, "shot.png");
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    await writeFile(imgPath, bytes);
+    let body: { messages: Array<{ content: unknown }> } | undefined;
+    const port = await listen((req, res) => {
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        body = JSON.parse(raw) as { messages: Array<{ content: unknown }> };
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n');
+        res.end("data: [DONE]\n\n");
+      });
+    });
+    const events = await collect(
+      streamOpenAI(
+        { ...model, baseUrl: `http://127.0.0.1:${port}/v1` },
+        {
+          systemPrompt: "s",
+          tools: [],
+          messages: [
+            {
+              role: "user",
+              content: "analyze",
+              timestamp: 1,
+              images: [{ mediaType: "image/png", path: imgPath }],
+            },
+          ],
+        },
+        { apiKey: "test" },
+      ),
+    );
+    expect(events.some((event) => event.type === "done")).toBe(true);
+    const content = body?.messages[1]?.content as Array<Record<string, unknown>>;
+    expect(content[0]).toEqual({ type: "text", text: "analyze" });
+    expect(content[1]).toEqual({
+      type: "image_url",
+      image_url: { url: `data:image/png;base64,${bytes.toString("base64")}` },
+    });
+  });
+
+  it("degrades missing image files to a text placeholder", async () => {
+    process.env["FAKE_KEY"] = "test";
+    const missing = join(tmpdir(), "cletus-img-missing", "gone.png");
+    let body: { messages: Array<{ content: unknown }> } | undefined;
+    const port = await listen((req, res) => {
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        body = JSON.parse(raw) as { messages: Array<{ content: unknown }> };
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n');
+        res.end("data: [DONE]\n\n");
+      });
+    });
+    const events = await collect(
+      streamOpenAI(
+        { ...model, baseUrl: `http://127.0.0.1:${port}/v1` },
+        {
+          systemPrompt: "s",
+          tools: [],
+          messages: [
+            {
+              role: "user",
+              content: "analyze",
+              timestamp: 1,
+              images: [{ mediaType: "image/png", path: missing }],
+            },
+          ],
+        },
+        { apiKey: "test" },
+      ),
+    );
+    expect(events.some((event) => event.type === "done")).toBe(true);
+    const content = body?.messages[1]?.content as unknown[];
+    expect(content).toContainEqual({ type: "text", text: `[图片不可用: ${missing}]` });
+    expect(content).toContainEqual({ type: "text", text: "analyze" });
   });
 });

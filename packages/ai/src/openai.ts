@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { AssistantEventStream } from "./event-stream.js";
 import { parseSse } from "./sse.js";
 import { parseRetryAfter, sleep } from "./retry.js";
@@ -28,8 +29,23 @@ function apiKeyFor(model: Model, options?: StreamOptions): string {
   return options?.apiKey ?? (model.apiKeyEnv ? process.env[model.apiKeyEnv] : "") ?? "";
 }
 
-function toOpenAIMessage(message: Message): Record<string, unknown> {
-  if (message.role === "user") return { role: "user", content: message.content };
+async function toOpenAIMessage(message: Message): Promise<Record<string, unknown>> {
+  if (message.role === "user") {
+    if (!message.images?.length) return { role: "user", content: message.content };
+    const parts: Array<Record<string, unknown>> = [{ type: "text", text: message.content }];
+    for (const image of message.images) {
+      try {
+        const data = (await readFile(image.path)).toString("base64");
+        parts.push({
+          type: "image_url",
+          image_url: { url: `data:${image.mediaType};base64,${data}` },
+        });
+      } catch {
+        parts.push({ type: "text", text: `[图片不可用: ${image.path}]` });
+      }
+    }
+    return { role: "user", content: parts };
+  }
   if (message.role === "assistant") {
     const text = message.content
       .filter((b) => b.type === "text")
@@ -90,10 +106,7 @@ export function streamOpenAI(
 
   const body = {
     model: model.id,
-    messages: [
-      { role: "system", content: context.systemPrompt },
-      ...context.messages.map(toOpenAIMessage),
-    ],
+    messages: [] as Array<Record<string, unknown>>,
     tools: context.tools.map((tool) => ({
       type: "function",
       function: {
@@ -118,6 +131,10 @@ export function streamOpenAI(
     let finishReason: string | undefined;
 
     try {
+      body.messages = [
+        { role: "system", content: context.systemPrompt },
+        ...(await Promise.all(context.messages.map(toOpenAIMessage))),
+      ];
       let response: Response | undefined;
       let lastError = "";
       for (let attempt = 0; attempt <= 2; attempt += 1) {
