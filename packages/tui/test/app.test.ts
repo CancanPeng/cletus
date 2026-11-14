@@ -537,6 +537,21 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("clears pending images when input is cleared with ctrl+c", async () => {
+    const ctx = await setupImageApp({ mimeType: "image/png", bytes: new Uint8Array([1]) });
+    ctx.mockInput.pressKey("v", { ctrl: true });
+    await ctx.flush();
+    expect(ctx.attachCalls).toHaveLength(1);
+    ctx.mockInput.pressCtrlC();
+    await ctx.flush();
+    ctx.mockInput.typeText("y");
+    ctx.mockInput.pressEnter();
+    await ctx.flush();
+    expect(ctx.submissions).toEqual([{ text: "y" }]);
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("clears pending images when input is cancelled", async () => {
     const ctx = await setupImageApp({ mimeType: "image/png", bytes: new Uint8Array([1]) });
     ctx.mockInput.pressKey("v", { ctrl: true });

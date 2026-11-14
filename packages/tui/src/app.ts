@@ -951,7 +951,10 @@ export class TuiApp {
       else if (this.selectState) this.finishSelect(undefined);
       else if (this.status.busy) this.options.abort();
       else if (!this.textarea?.plainText) this.stop();
-      else this.textarea.setText("");
+      else {
+        this.textarea.setText("");
+        this.pendingImages.length = 0;
+      }
       return;
     }
     if (this.manager) {
