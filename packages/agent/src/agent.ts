@@ -152,6 +152,9 @@ export class Agent {
           ...(this.options.getApiKey ? { getApiKey: this.options.getApiKey } : {}),
           tools: this.tools,
           ...(this.options.maxTurns !== undefined ? { maxTurns: this.options.maxTurns } : {}),
+          ...(this.options.maxAutoContinues !== undefined
+            ? { maxAutoContinues: this.options.maxAutoContinues }
+            : {}),
           convertToLlm: (messages) => this.convert(messages),
           ...(this.options.prepareRequest
             ? {

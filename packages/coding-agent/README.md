@@ -37,6 +37,21 @@ cletus -p "Summarize this repository"
 cletus --json -p "List the TODOs" | jq .
 ```
 
+## Turn limits
+
+Long autonomous runs are bounded so a runaway loop cannot spend forever. The agent stops after `maxTurns` turns (default **500**) and — instead of failing — starts another batch, up to `maxAutoContinues` times (default **3**), so a single prompt can run up to 2000 turns.
+
+Reaching the limit is not an error: nothing is written to the session transcript, the conversation stays resumable, and the last message is the real tool result. When every batch is used the run stops cleanly with a notice; send another message to keep going.
+
+```json
+{
+  "maxTurns": 500,
+  "maxAutoContinues": 3
+}
+```
+
+Override the batch size per run with `--max-turns <n>`. Subagents get a hard 30-turn cap with no auto-continue, since they cannot ask to keep going.
+
 ## Permissions
 
 Read tools are confined to the working directory plus configured skill/prompt roots. Writes and command execution require confirmation. `--yolo` disables confirmations; use it only in trusted workspaces. Non-interactive `-p`/`--json` runs deny writes and commands unless `--yolo` is passed.

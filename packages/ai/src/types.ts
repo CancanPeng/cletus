@@ -1,5 +1,5 @@
 export type ThinkingLevel = "off" | "low" | "medium" | "high";
-export type StopReason = "stop" | "length" | "toolUse" | "error" | "aborted";
+export type StopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "maxTurns";
 
 export type TextContent = { type: "text"; text: string };
 export type ImageAttachment = { mediaType: "image/png" | "image/jpeg"; path: string };

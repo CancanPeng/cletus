@@ -8,7 +8,7 @@ import {
   type StreamFn,
 } from "@cletus/ai";
 import { runAgentLoop } from "../src/loop.js";
-import type { AgentEvent, AgentTool } from "../src/types.js";
+import type { AgentEvent, AgentMessage, AgentTool } from "../src/types.js";
 
 const model: Model = {
   provider: "openai",
@@ -339,5 +339,202 @@ describe("runAgentLoop", () => {
         "steer",
       ]);
     }
+  });
+
+  it("auto-continues past the turn cap and keeps history clean", async () => {
+    const events: AgentEvent[] = [];
+    const tool: AgentTool = {
+      name: "noop",
+      description: "noop",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+    };
+    let call = 0;
+    const streamFn: StreamFn = () => {
+      call += 1;
+      return fakeStream(
+        assistantMessage(
+          model,
+          [{ type: "toolCall", id: `c${call}`, name: "noop", arguments: {} }],
+          "toolUse",
+        ),
+      );
+    };
+    await runAgentLoop(
+      [{ text: "go" }],
+      { systemPrompt: "s", messages: [], tools: [tool] },
+      {
+        model,
+        streamFn,
+        tools: [tool],
+        maxTurns: 2,
+        maxAutoContinues: 2,
+        convertToLlm: (messages) =>
+          messages.filter((message) => message.role !== "custom") as never,
+      },
+      async (event) => {
+        events.push(event);
+      },
+      new AbortController().signal,
+    );
+
+    // 2 turns initial + 2 turns per auto-continue, 2 continues.
+    expect(call).toBe(6);
+    const notices = events.filter(
+      (event) => event.type === "turn_limit" && event.continuing,
+    );
+    expect(notices).toHaveLength(2);
+
+    const end = events.find((event) => event.type === "agent_end");
+    expect(end?.type).toBe("agent_end");
+    if (end?.type !== "agent_end") return;
+    // No fabricated assistant message in history, and the run ends on a
+    // real tool result rather than an empty assistant message.
+    const last = end.messages[end.messages.length - 1];
+    expect(last?.role).toBe("toolResult");
+    const fabricated = end.messages.filter(
+      (message) =>
+        message.role === "assistant" &&
+        message.content.length === 0 &&
+        message.stopReason === "error",
+    );
+    expect(fabricated).toHaveLength(0);
+  });
+
+  it("stops with a maxTurns stop reason once auto-continues are exhausted", async () => {
+    const events: AgentEvent[] = [];
+    const tool: AgentTool = {
+      name: "noop",
+      description: "noop",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+    };
+    let call = 0;
+    const streamFn: StreamFn = () => {
+      call += 1;
+      return fakeStream(
+        assistantMessage(
+          model,
+          [{ type: "toolCall", id: `c${call}`, name: "noop", arguments: {} }],
+          "toolUse",
+        ),
+      );
+    };
+    await runAgentLoop(
+      [{ text: "go" }],
+      { systemPrompt: "s", messages: [], tools: [tool] },
+      {
+        model,
+        streamFn,
+        tools: [tool],
+        maxTurns: 2,
+        maxAutoContinues: 1,
+        convertToLlm: (messages) =>
+          messages.filter((message) => message.role !== "custom") as never,
+      },
+      async (event) => {
+        events.push(event);
+      },
+      new AbortController().signal,
+    );
+
+    expect(call).toBe(4);
+    const finals = events.filter(
+      (event) => event.type === "turn_limit" && !event.continuing,
+    );
+    expect(finals).toHaveLength(1);
+    if (finals[0]?.type !== "turn_limit") return;
+    expect(finals[0].turns).toBe(2);
+    expect(finals[0].autoContinues).toBe(1);
+
+    // The agent ends without appending anything to the transcript, so the
+    // next prompt still sees a normal conversation.
+    const end = events.find((event) => event.type === "agent_end");
+    if (end?.type !== "agent_end") return;
+    const last = end.messages[end.messages.length - 1];
+    expect(last?.role).toBe("toolResult");
+    expect(
+      end.messages.some(
+        (message) => message.role === "assistant" && message.content.length === 0,
+      ),
+    ).toBe(false);
+  });
+
+  it("leaves the conversation resumable after the turn limit", async () => {
+    const tool: AgentTool = {
+      name: "noop",
+      description: "noop",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+    };
+    let call = 0;
+    const streamFn: StreamFn = () => {
+      call += 1;
+      return fakeStream(
+        assistantMessage(
+          model,
+          [{ type: "toolCall", id: `c${call}`, name: "noop", arguments: {} }],
+          "toolUse",
+        ),
+      );
+    };
+    const events: AgentEvent[] = [];
+    let finalMessages: AgentMessage[] = [];
+    await runAgentLoop(
+      [{ text: "go" }],
+      { systemPrompt: "s", messages: [], tools: [tool] },
+      {
+        model,
+        streamFn,
+        tools: [tool],
+        maxTurns: 1,
+        maxAutoContinues: 0,
+        convertToLlm: (messages) =>
+          messages.filter((message) => message.role !== "custom") as never,
+      },
+      async (event) => {
+        events.push(event);
+        if (event.type === "agent_end") finalMessages = event.messages;
+      },
+      new AbortController().signal,
+    );
+
+    // Every limit-stop leaves the transcript ending on a tool result, which
+    // is exactly the precondition Agent.continue() needs.
+    expect(finalMessages[finalMessages.length - 1]?.role).toBe("toolResult");
+    expect(finalMessages.some((message) => message.role === "custom")).toBe(false);
+
+    // Everything the provider would be shown is non-empty and alternating.
+    const usable = finalMessages.filter((message) => message.role !== "custom");
+    for (const message of usable) {
+      if (message.role === "assistant") {
+        expect(message.content.length).toBeGreaterThan(0);
+      }
+    }
+
+    // A second run over the same history works: the loop must not choke on
+    // the transcript a limit-stop left behind.
+    const second: AgentEvent[] = [];
+    await runAgentLoop(
+      [{ text: "again" }],
+      { systemPrompt: "s", messages: finalMessages, tools: [tool] },
+      {
+        model,
+        streamFn: () =>
+          fakeStream(assistantMessage(model, [{ type: "text", text: "done" }], "stop")),
+        tools: [tool],
+        maxTurns: 5,
+        convertToLlm: (messages) =>
+          messages.filter((message) => message.role !== "custom") as never,
+      },
+      async (event) => {
+        second.push(event);
+      },
+      new AbortController().signal,
+    );
+    const end = second.find((event) => event.type === "agent_end");
+    expect(end?.type).toBe("agent_end");
+    if (end?.type !== "agent_end") return;
+    expect(end.messages[end.messages.length - 1]?.role).toBe("assistant");
   });
 });

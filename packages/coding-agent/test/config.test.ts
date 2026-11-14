@@ -19,6 +19,8 @@ function config(): CletusConfig {
       },
     ],
     compaction: { reserveTokens: 16384, keepRecentTokens: 20000 },
+    maxTurns: 500,
+    maxAutoContinues: 3,
     webSearch: { enabled: false, order: [], timeoutSeconds: 30 },
     skillOverrides: {},
     permissions: { allowWrite: [] },

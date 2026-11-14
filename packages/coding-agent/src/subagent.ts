@@ -27,7 +27,10 @@ export function createSubagentRunner(deps: {
       streamFn: deps.streamFn,
       cwd: deps.cwd,
       initialState: { systemPrompt, tools, messages: [] },
+      // A subagent is non-interactive: it cannot ask to continue, so it gets
+      // a hard cap with no auto-continue batches.
       maxTurns: 30,
+      maxAutoContinues: 0,
       // Subagents are non-interactive: enforce the same permission model
       // (writes/commands denied unless yolo or allowlisted).
       beforeToolCall: async (call, args) => {

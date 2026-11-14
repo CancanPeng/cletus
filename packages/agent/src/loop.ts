@@ -122,7 +122,12 @@ export async function runAgentLoop(
   let tools = context.tools;
   let model = config.model;
   const maxTurns = config.maxTurns ?? 100;
+  const maxAutoContinues = config.maxAutoContinues ?? 0;
+  // `turn` is the count within the current batch (reset by an auto-continue);
+  // `totalTurns` is monotonic so progress displays never jump backwards.
   let turn = 0;
+  let totalTurns = 0;
+  let autoContinues = 0;
 
   const appendQueued = async (inputs: PromptInput[]): Promise<void> => {
     for (const input of inputs) {
@@ -151,15 +156,33 @@ export async function runAgentLoop(
       break;
     }
     if (turn >= maxTurns) {
-      const limited = errorAssistant(model, `Max turns exceeded (${maxTurns})`);
-      messages.push(limited);
-      await emitMessage(emit, limited);
-      await emit({ type: "turn_end", message: limited, toolResults: [] });
+      // Nothing is appended to the transcript here: a synthetic message would
+      // be persisted by the session and poison every later request with an
+      // empty assistant turn. Report the limit and either continue with a
+      // fresh batch of turns or stop on the last real message.
+      if (autoContinues < maxAutoContinues) {
+        autoContinues += 1;
+        turn = 0;
+        await emit({
+          type: "turn_limit",
+          turns: maxTurns,
+          autoContinues,
+          continuing: true,
+        });
+        continue;
+      }
+      await emit({
+        type: "turn_limit",
+        turns: maxTurns,
+        autoContinues,
+        continuing: false,
+      });
       break;
     }
 
     turn += 1;
-    await emit({ type: "turn_start", turn });
+    totalTurns += 1;
+    await emit({ type: "turn_start", turn: totalTurns });
 
     if (config.prepareRequest) {
       try {

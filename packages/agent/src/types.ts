@@ -90,6 +90,8 @@ export type AgentOptions = {
   ) => Promise<Partial<ToolResult> | void>;
   prepareRequest?: (ctx: PrepareRequestContext) => Promise<PrepareRequestResult>;
   maxTurns?: number;
+  /** Extra turn batches to run after hitting `maxTurns`. Defaults to 0. */
+  maxAutoContinues?: number;
 };
 
 export type AgentEvent =
@@ -109,6 +111,17 @@ export type AgentEvent =
   | { type: "tool_execution_update"; toolCallId: string; partial: ToolResult }
   | { type: "tool_execution_end"; toolCallId: string; toolName: string; result: ToolResult }
   | { type: "turn_end"; message: Message & { role: "assistant" }; toolResults: Message[] }
+  | {
+      /**
+       * The turn cap was reached. `continuing` is true when the loop is
+       * starting another batch of turns; nothing is added to the transcript
+       * either way, so the conversation stays resumable.
+       */
+      type: "turn_limit";
+      turns: number;
+      autoContinues: number;
+      continuing: boolean;
+    }
   | { type: "agent_end"; messages: AgentMessage[] };
 
 export type AgentLoopConfig = {
@@ -118,6 +131,8 @@ export type AgentLoopConfig = {
   tools: AgentTool[];
   cwd?: string;
   maxTurns?: number;
+  /** Extra turn batches to run after hitting `maxTurns`. Defaults to 0. */
+  maxAutoContinues?: number;
   convertToLlm: (messages: AgentMessage[]) => Message[];
   prepareRequest?: AgentOptions["prepareRequest"];
   beforeToolCall?: AgentOptions["beforeToolCall"];

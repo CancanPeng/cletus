@@ -62,6 +62,8 @@ export class AgentSession {
       streamFn: this.streamFn,
       cwd: options.cwd,
       initialState: { messages: [], tools: [] },
+      maxTurns: options.config.maxTurns,
+      maxAutoContinues: options.config.maxAutoContinues,
       getApiKey: (model) => resolveApiKey(options.config, options.auth, model),
       prepareRequest: (ctx) => this.prepareRequest(ctx),
       beforeToolCall: async (call, args) => this.beforeToolCall(call.name, args),

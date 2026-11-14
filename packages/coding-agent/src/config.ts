@@ -30,6 +30,10 @@ export type CletusConfig = {
     }
   >;
   compaction: CompactionConfig;
+  /** Turns before the agent stops for breath; it auto-continues past this. */
+  maxTurns: number;
+  /** Extra turn batches granted each time `maxTurns` is reached. */
+  maxAutoContinues: number;
   webSearch: WebSearchConfig;
   skillOverrides: Record<string, SkillVisibility>;
   permissions: { allowWrite: string[] };
@@ -69,6 +73,8 @@ export function createDefaultConfig(): CletusConfig {
     },
     models: [],
     compaction: { reserveTokens: 16384, keepRecentTokens: 20000 },
+    maxTurns: 500,
+    maxAutoContinues: 3,
     webSearch: {
       enabled: true,
       order: ["parallel", "exa", "firecrawl", "brave", "tavily", "searxng", "duckduckgo"],

@@ -76,6 +76,7 @@ Options:
       --trust            Trust project .cletus resources
       --no-extensions    Do not load extensions
       --cwd <path>       Working directory
+      --max-turns <n>    Turns before the agent pauses to continue (default 500)
       --version          Print version
   -h, --help             Print help
 
@@ -338,6 +339,13 @@ async function runTui(opts: {
       if (event.message.stopReason === "error") {
         app.notify(event.message.errorMessage ?? "Model error", "error");
       }
+    } else if (event.type === "turn_limit") {
+      app.notify(
+        event.continuing
+          ? `Reached ${event.turns} turns — continuing (${event.autoContinues} extra batch)`
+          : `Stopped after ${event.turns} turns × ${event.autoContinues + 1} batches. Send another message to keep going, or raise maxTurns in ~/.cletus/config.json`,
+        event.continuing ? "warn" : "error",
+      );
     } else if (event.type === "tool_execution_start") {
       app.setStatus({
         busy: true,
@@ -1092,6 +1100,14 @@ async function runPrint(opts: {
   };
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") stopReason = event.message.stopReason;
+    if (event.type === "turn_limit" && !event.continuing) {
+      stopReason = "maxTurns";
+      if (!opts.json) {
+        process.stderr.write(
+          `[turn limit] stopped after ${event.turns} turns × ${event.autoContinues + 1} batches; raise --max-turns or maxTurns in config.json\n`,
+        );
+      }
+    }
     if (opts.json) {
       process.stdout.write(`${serialize(event)}\n`);
       return;
@@ -1354,6 +1370,7 @@ async function main(): Promise<number> {
       trust: { type: "boolean" },
       "no-extensions": { type: "boolean" },
       cwd: { type: "string" },
+      "max-turns": { type: "string" },
       version: { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
@@ -1388,6 +1405,14 @@ async function main(): Promise<number> {
       process.stderr.write("No models configured. Run: cletus import-pi\n");
       return 2;
     }
+  }
+
+  if (parsed.values["max-turns"] !== undefined) {
+    const turns = Number(parsed.values["max-turns"]);
+    if (!Number.isFinite(turns) || turns < 1) {
+      throw new ConfigError("--max-turns must be a positive number");
+    }
+    config.maxTurns = Math.floor(turns);
   }
 
   const model = resolveModel(config, auth, parsed.values.model);
