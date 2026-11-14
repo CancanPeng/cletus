@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { parseArgs } from "node:util";
 import type { AgentEvent, AgentMessage } from "@cletus/agent";
-import type { Model } from "@cletus/ai";
+import { toolContentText, type Model } from "@cletus/ai";
 import type { TuiApp as TuiAppType, SlashCommand } from "@cletus/tui";
 import {
   ConfigError,
@@ -360,10 +360,10 @@ async function runTui(opts: {
         startedAt: Date.now(),
       });
     } else if (event.type === "tool_execution_update") {
-      const text = event.partial.content.map((block) => block.text).join("");
+      const text = toolContentText(event.partial.content);
       app.updateBlock(`t${event.toolCallId}`, { kind: "tool", output: text });
     } else if (event.type === "tool_execution_end") {
-      const text = event.result.content.map((block) => block.text).join("");
+      const text = toolContentText(event.result.content);
       const started = toolStarts.get(event.toolCallId);
       toolStarts.delete(event.toolCallId);
       app.updateBlock(`t${event.toolCallId}`, {
@@ -1100,7 +1100,7 @@ async function runPrint(opts: {
     } else if (event.type === "tool_execution_start") {
       process.stderr.write(`[tool] ${event.toolName} ${JSON.stringify(event.args)}\n`);
     } else if (event.type === "tool_execution_end" && event.result.isError) {
-      const text = event.result.content.map((block) => block.text).join("");
+      const text = toolContentText(event.result.content);
       process.stderr.write(`[tool error] ${text}\n`);
     }
   });

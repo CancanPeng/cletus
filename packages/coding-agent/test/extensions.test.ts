@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { toolContentText } from "@cletus/ai";
 import { ExtensionHost } from "../src/extensions/host.js";
 
 const dirs: string[] = [];
@@ -50,7 +51,7 @@ describe("ExtensionHost", () => {
         onUpdate: () => undefined,
       },
     );
-    expect(result.content[0]?.text).toBe("hello from ext");
+    expect(toolContentText(result.content)).toBe("hello from ext");
     expect(await host.beforeToolCall("bash", { command: "ls" })).toEqual({
       block: true,
       reason: "no bash",

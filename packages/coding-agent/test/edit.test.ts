@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { toolContentText } from "@cletus/ai";
 import { PermissionPolicy } from "../src/permissions/policy.js";
 import { createEditTool } from "../src/tools/edit.js";
 
@@ -48,7 +49,7 @@ describe("edit tool", () => {
       },
       context(cwd),
     );
-    expect(result.isError, result.content[0]?.text).toBeFalsy();
+    expect(result.isError, toolContentText(result.content)).toBeFalsy();
     expect(await readFile(path, "utf8")).toBe("x\r\ny\r\nz\r\n");
   });
 
@@ -68,12 +69,12 @@ describe("edit tool", () => {
       context(cwd),
     );
     expect(duplicate.isError).toBe(true);
-    expect(duplicate.content[0]?.text).toContain("matched 2 times");
+    expect(toolContentText(duplicate.content)).toContain("matched 2 times");
     const missing = await tool.execute(
       { path: "file.txt", edits: [{ oldText: "absent", newText: "other" }] },
       context(cwd),
     );
     expect(missing.isError).toBe(true);
-    expect(missing.content[0]?.text).toContain("not found");
+    expect(toolContentText(missing.content)).toContain("not found");
   });
 });

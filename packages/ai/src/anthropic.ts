@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { AssistantEventStream } from "./event-stream.js";
 import { parseSse } from "./sse.js";
 import { parseRetryAfter, sleep } from "./retry.js";
+import { toolContentText } from "./tokens.js";
 import {
   assistantMessage,
   emptyUsage,
@@ -81,7 +82,7 @@ async function toAnthropicMessages(messages: Message[]): Promise<Array<Record<st
       append("user", {
         type: "tool_result",
         tool_use_id: message.toolCallId,
-        content: message.content.map((block) => ({ type: "text", text: block.text })),
+        content: [{ type: "text", text: toolContentText(message.content) }],
         is_error: message.isError,
       });
     }

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { AssistantEventStream } from "./event-stream.js";
 import { parseSse } from "./sse.js";
 import { parseRetryAfter, sleep } from "./retry.js";
+import { toolContentText } from "./tokens.js";
 import {
   assistantMessage,
   emptyUsage,
@@ -71,7 +72,7 @@ async function toOpenAIMessage(message: Message): Promise<Record<string, unknown
   return {
     role: "tool",
     tool_call_id: message.toolCallId,
-    content: message.content.map((b) => b.text).join(""),
+    content: toolContentText(message.content),
   };
 }
 

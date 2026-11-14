@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AssistantEventStream,
   assistantMessage,
+  toolContentText,
   type LlmContext,
   type Model,
 } from "@cletus/ai";
@@ -47,7 +48,7 @@ describe("subagent", () => {
       buildSystemPrompt: () => "parent prompt",
     });
     const result = await run({ description: "test", prompt: "child task" });
-    expect(result.content[0]?.text).toBe("child result");
+    expect(toolContentText(result.content)).toBe("child result");
     expect(contexts).toHaveLength(1);
     expect(contexts[0]?.messages).toHaveLength(1);
     expect(contexts[0]?.messages[0]?.role).toBe("user");

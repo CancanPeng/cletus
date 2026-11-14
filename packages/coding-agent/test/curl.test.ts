@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
+import { toolContentText } from "@cletus/ai";
 import { createCurlTool } from "../src/tools/curl.js";
 
 let server: Server | undefined;
@@ -45,7 +46,7 @@ describe("curl tool", () => {
     );
     const elapsed = Date.now() - started;
     expect(result.isError).toBeFalsy();
-    const text = result.content[0]?.text ?? "";
+    const text = toolContentText(result.content) ?? "";
     expect(text).toContain("body:/a");
     expect(text).toContain("body:/b");
     expect(text).toContain("body:/c");
@@ -64,7 +65,7 @@ describe("curl tool", () => {
       },
     );
     expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).toContain("Unsupported URL protocol");
+    expect(toolContentText(result.content)).toContain("Unsupported URL protocol");
   });
 
   it("reports the full HTTP status and resists marker spoofing", async () => {
@@ -88,7 +89,7 @@ describe("curl tool", () => {
         onUpdate: () => undefined,
       },
     );
-    const text = result.content[0]?.text ?? "";
+    const text = toolContentText(result.content) ?? "";
     expect(text).toContain("HTTP 404");
     expect(text).toContain("__CLETUS_STATUS__200");
     const details = result.details as { results: Array<{ status?: number }> };
@@ -108,7 +109,7 @@ describe("curl tool", () => {
         },
       );
       expect(result.isError).toBe(true);
-      expect(result.content[0]?.text).toContain("Invalid header");
+      expect(toolContentText(result.content)).toContain("Invalid header");
     }
   });
 });

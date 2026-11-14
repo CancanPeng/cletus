@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AssistantEventStream,
   assistantMessage,
+  toolContentText,
   type Model,
   type StreamFn,
 } from "@cletus/ai";
@@ -101,7 +102,7 @@ describe("Agent", () => {
     expect(executed).toBe(false);
     const results = agent.state.messages.filter((message) => message.role === "toolResult");
     expect(results).toHaveLength(1);
-    expect(results[0]?.content[0]?.text).toContain("denied");
+    expect(toolContentText(results[0]?.content ?? [])).toContain("denied");
   });
 
   it("does not expose internal arrays through state", async () => {

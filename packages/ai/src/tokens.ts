@@ -1,4 +1,5 @@
-import type { LlmContext, Message } from "./types.js";
+import { basename } from "node:path";
+import type { LlmContext, Message, ToolContent } from "./types.js";
 
 export function estimateTokens(text: string): number {
   let ascii = 0;
@@ -28,9 +29,20 @@ export function estimateMessageTokens(message: Message): number {
       else total += estimateTokens(block.name + JSON.stringify(block.arguments));
     }
   } else {
-    for (const block of message.content) total += estimateTokens(block.text);
+    for (const block of message.content) {
+      total += block.type === "text" ? estimateTokens(block.text) : 1600;
+    }
   }
   return total;
+}
+
+/** Flattens tool result content to text, rendering images as a placeholder line. */
+export function toolContentText(content: ToolContent[]): string {
+  return content
+    .map((block) =>
+      block.type === "text" ? block.text : `[图片: ${basename(block.path)}  ${block.mediaType}]`,
+    )
+    .join("\n");
 }
 
 export function estimateContextTokens(context: LlmContext): number {

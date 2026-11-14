@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import {
   estimateMessageTokens,
+  toolContentText,
   type AssistantContent,
   type AssistantMessage,
   type Model,
@@ -113,9 +114,7 @@ function serializeMessage(entry: SessionEntry): string {
     return `## Assistant\n${text}\n`;
   }
   if (message.role === "toolResult") {
-    return `## Tool result (${message.toolName})\n${message.content
-      .map((block) => block.text)
-      .join("")}\n`;
+    return `## Tool result (${message.toolName})\n${toolContentText(message.content)}\n`;
   }
   return "";
 }

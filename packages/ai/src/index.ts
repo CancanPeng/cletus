@@ -9,7 +9,7 @@ export type { StreamFn } from "./event-stream.js";
 export { parseSse } from "./sse.js";
 export { streamOpenAI } from "./openai.js";
 export { streamAnthropic } from "./anthropic.js";
-export { estimateTokens, estimateMessageTokens, estimateContextTokens } from "./tokens.js";
+export { estimateTokens, estimateMessageTokens, estimateContextTokens, toolContentText } from "./tokens.js";
 
 export const streamSimple: StreamFn = (
   model: Model,

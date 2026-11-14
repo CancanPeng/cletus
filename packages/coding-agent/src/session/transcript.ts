@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@cletus/agent";
+import { toolContentText } from "@cletus/ai";
 import type { TranscriptBlock } from "@cletus/tui";
 
 function textOf(message: AgentMessage): string {
@@ -29,7 +30,7 @@ export function projectionBlocks(
   for (const message of messages) {
     if (message.role !== "toolResult") continue;
     results.set(message.toolCallId, {
-      text: message.content.map((block) => block.text).join(""),
+      text: toolContentText(message.content),
       isError: message.isError,
     });
   }

@@ -4,7 +4,7 @@ import type {
   Message,
   Model,
   StreamFn,
-  TextContent,
+  ToolContent,
   ToolCallContent,
 } from "@cletus/ai";
 
@@ -27,7 +27,7 @@ export type JsonValue =
   | { [k: string]: JsonValue };
 
 export type ToolResult = {
-  content: TextContent[];
+  content: ToolContent[];
   details?: unknown;
   isError?: boolean;
   terminate?: boolean;

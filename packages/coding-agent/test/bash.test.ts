@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { toolContentText } from "@cletus/ai";
 import { PermissionPolicy } from "../src/permissions/policy.js";
 import { createBashTool } from "../src/tools/bash.js";
 
@@ -36,12 +37,12 @@ describe("bash tool", () => {
         toolCallId: "call",
         signal: new AbortController().signal,
         onUpdate: (partial) => {
-          updates.push(partial.content.map((block) => block.text).join(""));
+          updates.push(toolContentText(partial.content));
         },
       },
     );
     expect(updates.some((text) => text.includes("one"))).toBe(true);
-    expect(result.content[0]?.text).toContain("onetwo");
+    expect(toolContentText(result.content)).toContain("onetwo");
   });
 
   it("preserves multibyte characters split across output chunks", async () => {
@@ -64,7 +65,7 @@ describe("bash tool", () => {
         onUpdate: () => {},
       },
     );
-    expect(result.content[0]?.text).toContain("你好");
+    expect(toolContentText(result.content)).toContain("你好");
   });
 
   it("writes the full output log before returning a truncated result", async () => {
@@ -87,7 +88,7 @@ describe("bash tool", () => {
         onUpdate: () => {},
       },
     );
-    const text = result.content[0]?.text ?? "";
+    const text = toolContentText(result.content) ?? "";
     expect(text).toContain("truncated");
     const logPath = join(cwd, "tmp", "bash-call-log.log");
     const log = await readFile(logPath, "utf8");
@@ -118,6 +119,6 @@ describe("bash tool environment", () => {
       { command: "printf %s \"$CLETUS_MODEL\"" },
       { cwd, toolCallId: "call-env", signal: new AbortController().signal, onUpdate: () => {} },
     );
-    expect(result.content[0]?.text).toContain("aliyun-token-plan/deepseek-v4.1-flash-1017");
+    expect(toolContentText(result.content)).toContain("aliyun-token-plan/deepseek-v4.1-flash-1017");
   });
 });

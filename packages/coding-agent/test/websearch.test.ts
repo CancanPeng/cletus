@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { toolContentText } from "@cletus/ai";
 import {
   filterSources,
   parseQueryConstraints,
@@ -183,7 +184,7 @@ describe("web search", () => {
       },
     );
     expect(result.isError).toBeFalsy();
-    expect(result.content[0]?.text).toContain("Answer");
-    expect(result.content[0]?.text).toContain("https://example.com");
+    expect(toolContentText(result.content)).toContain("Answer");
+    expect(toolContentText(result.content)).toContain("https://example.com");
   });
 });

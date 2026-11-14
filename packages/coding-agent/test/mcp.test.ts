@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { toolContentText } from "@cletus/ai";
 import { McpManager } from "../src/mcp/manager.js";
 
 const dirs: string[] = [];
@@ -37,7 +38,7 @@ describe("McpManager", () => {
         onUpdate: () => undefined,
       },
     );
-    expect(result.content[0]?.text).toBe("echo: hi");
+    expect(toolContentText(result.content)).toBe("echo: hi");
     await manager.dispose();
   });
 });

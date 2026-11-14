@@ -3,6 +3,8 @@ export type StopReason = "stop" | "length" | "toolUse" | "error" | "aborted";
 
 export type TextContent = { type: "text"; text: string };
 export type ImageAttachment = { mediaType: "image/png" | "image/jpeg"; path: string };
+export type ImageContent = { type: "image"; mediaType: "image/png" | "image/jpeg"; path: string };
+export type ToolContent = TextContent | ImageContent;
 export type ThinkingContent = { type: "thinking"; thinking: string; signature?: string };
 export type ToolCallContent = {
   type: "toolCall";
@@ -43,7 +45,7 @@ export type Message =
       role: "toolResult";
       toolCallId: string;
       toolName: string;
-      content: TextContent[];
+      content: ToolContent[];
       isError: boolean;
       timestamp: number;
     };
