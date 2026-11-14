@@ -17,7 +17,9 @@ export function estimateTokens(text: string): number {
 
 export function estimateMessageTokens(message: Message): number {
   let total = 4;
-  if (message.role === "user" || message.role === "system") {
+  if (message.role === "user") {
+    total += estimateTokens(message.content) + (message.images?.length ?? 0) * 1600;
+  } else if (message.role === "system") {
     total += estimateTokens(message.content);
   } else if (message.role === "assistant") {
     for (const block of message.content) {

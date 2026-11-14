@@ -2,6 +2,7 @@ export type ThinkingLevel = "off" | "low" | "medium" | "high";
 export type StopReason = "stop" | "length" | "toolUse" | "error" | "aborted";
 
 export type TextContent = { type: "text"; text: string };
+export type ImageAttachment = { mediaType: "image/png" | "image/jpeg"; path: string };
 export type ThinkingContent = { type: "thinking"; thinking: string; signature?: string };
 export type ToolCallContent = {
   type: "toolCall";
@@ -36,7 +37,7 @@ export type AssistantMessage = {
 
 export type Message =
   | { role: "system"; content: string; timestamp: number }
-  | { role: "user"; content: string; timestamp: number }
+  | { role: "user"; content: string; timestamp: number; images?: ImageAttachment[] }
   | AssistantMessage
   | {
       role: "toolResult";
@@ -75,6 +76,7 @@ export type Model = {
   maxOutputTokens: number;
   supportsThinking?: boolean;
   thinkingLevel?: ThinkingLevel;
+  supportsImages?: boolean;
 };
 
 export type AssistantStreamEvent =
