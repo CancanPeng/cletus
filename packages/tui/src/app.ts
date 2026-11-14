@@ -40,7 +40,24 @@ export type ManagedListTab = {
   refresh?: () => Promise<ManagedItem[]>;
 };
 
-export type ManagedTab = ManagedListTab;
+export type ManagedSearchTab = {
+  kind: "search";
+  id: string;
+  title: string;
+  placeholder: string;
+  search: (query: string, signal: AbortSignal) => Promise<ManagedResult[]>;
+  onAccept: (result: ManagedResult) => Promise<void> | void;
+};
+
+export type ManagedPromptTab = {
+  kind: "prompt";
+  id: string;
+  title: string;
+  placeholder: string;
+  onSubmit: (value: string) => Promise<void> | void;
+};
+
+export type ManagedTab = ManagedListTab | ManagedSearchTab | ManagedPromptTab;
 
 export type SlashCommand = {
   name: string;
@@ -175,6 +192,15 @@ export class TuiApp {
         tabIndex: number;
         index: number;
         query: string;
+        input: InputRenderable | undefined;
+        inputBox: BoxRenderable | undefined;
+        inputTabId: string | undefined;
+        results: ManagedResult[];
+        resultIndex: number;
+        searching: boolean;
+        searchError: string | undefined;
+        debounce: NodeJS.Timeout | undefined;
+        controller: AbortController | undefined;
         resolve: () => void;
         box: BoxRenderable | undefined;
         headerRow: TextRenderable | undefined;
@@ -557,6 +583,15 @@ export class TuiApp {
       tabIndex: 0,
       index: 0,
       query: "",
+      input: undefined,
+      inputBox: undefined,
+      inputTabId: undefined,
+      results: [],
+      resultIndex: 0,
+      searching: false,
+      searchError: undefined,
+      debounce: undefined,
+      controller: undefined,
       resolve: state.resolve,
       box: undefined,
       headerRow: undefined,
@@ -1332,11 +1367,43 @@ export class TuiApp {
   }
 
   private handleManagerKey(key: KeyEvent): void {
-    this.intercept(key);
     const manager = this.manager;
     if (!manager) return;
+    if (key.name === "tab") {
+      this.intercept(key);
+      manager.tabIndex = key.shift
+        ? (manager.tabIndex - 1 + manager.tabs.length) % manager.tabs.length
+        : (manager.tabIndex + 1) % manager.tabs.length;
+      this.clearManagerSearch();
+      manager.query = "";
+      manager.index = 0;
+      manager.resultIndex = 0;
+      this.renderManager();
+      const nextTab = manager.tabs[manager.tabIndex];
+      if (nextTab?.kind === "list" && nextTab.refresh) {
+        void nextTab.refresh().then((items) => {
+          if (this.manager !== manager) return;
+          nextTab.items = items;
+          this.renderManager();
+        });
+      }
+      return;
+    }
     const tab = manager.tabs[manager.tabIndex];
-    if (!tab || tab.kind !== "list") return;
+    if (!tab) return;
+    if (tab.kind !== "list") {
+      if (
+        key.name === "escape" ||
+        key.name === "return" ||
+        key.name === "up" ||
+        key.name === "down"
+      ) {
+        this.intercept(key);
+      }
+      this.handleManagerInputKey(key, tab);
+      return;
+    }
+    this.intercept(key);
     if (key.name === "return") {
       this.closeManager();
       return;
@@ -1393,8 +1460,157 @@ export class TuiApp {
     const manager = this.manager;
     if (!manager) return;
     this.manager = undefined;
+    clearTimeout(manager.debounce);
+    manager.debounce = undefined;
+    manager.controller?.abort();
+    manager.controller = undefined;
+    manager.inputBox?.destroyRecursively();
+    manager.inputBox = undefined;
+    manager.input = undefined;
     manager.box?.destroyRecursively();
     manager.resolve();
+  }
+
+  private clearManagerSearch(): void {
+    const manager = this.manager;
+    if (!manager) return;
+    clearTimeout(manager.debounce);
+    manager.debounce = undefined;
+    manager.controller?.abort();
+    manager.controller = undefined;
+    manager.searching = false;
+    manager.searchError = undefined;
+    manager.results = [];
+  }
+
+  private handleManagerInputKey(key: KeyEvent, tab: ManagedSearchTab | ManagedPromptTab): void {
+    const manager = this.manager;
+    if (!manager) return;
+    if (key.name === "escape") {
+      const back = manager.tabs.findIndex((candidate) => candidate.kind === "list");
+      if (back < 0) {
+        this.closeManager();
+        return;
+      }
+      manager.tabIndex = back;
+      this.clearManagerSearch();
+      manager.query = "";
+      manager.index = 0;
+      manager.resultIndex = 0;
+      this.renderManager();
+      return;
+    }
+    if (tab.kind === "search" && (key.name === "up" || key.name === "down")) {
+      if (manager.results.length === 0) return;
+      manager.resultIndex =
+        key.name === "up"
+          ? Math.max(0, manager.resultIndex - 1)
+          : Math.min(manager.results.length - 1, manager.resultIndex + 1);
+      this.renderManagerBody();
+      this.renderer?.requestRender();
+      return;
+    }
+    if (key.name === "return") {
+      if (tab.kind === "search") {
+        const result = manager.results[manager.resultIndex];
+        if (!result) return;
+        void Promise.resolve(tab.onAccept(result)).catch((error: unknown) => {
+          this.notify(error instanceof Error ? error.message : String(error), "error");
+        });
+        return;
+      }
+      const value = manager.input?.value.trim() ?? "";
+      if (!value) return;
+      void Promise.resolve(tab.onSubmit(value)).catch((error: unknown) => {
+        this.notify(error instanceof Error ? error.message : String(error), "error");
+      });
+      manager.input?.setText("");
+      this.renderManagerBody();
+      this.renderer?.requestRender();
+    }
+  }
+
+  private ensureManagerInput(): void {
+    const manager = this.manager;
+    const tab = manager?.tabs[manager.tabIndex];
+    if (!manager || !manager.box || !this.renderer) return;
+    const wanted = tab && tab.kind !== "list" ? tab.id : undefined;
+    if (manager.inputTabId === wanted) return;
+    manager.inputBox?.destroyRecursively();
+    manager.inputBox = undefined;
+    manager.input = undefined;
+    manager.inputTabId = wanted;
+    if (!wanted || !tab || tab.kind === "list") return;
+    const inputBox = new BoxRenderable(this.renderer, {
+      id: "skills-manager-input",
+      width: "100%",
+      height: 1,
+      flexShrink: 0,
+      flexDirection: "column",
+    });
+    const input: InputRenderable = new InputRenderable(this.renderer, {
+      width: "100%",
+      placeholder: tab.placeholder,
+      placeholderColor: this.color("inputPlaceholder"),
+      backgroundColor: this.theme.colors.inputBg,
+      textColor: this.color("inputText"),
+      focusedBackgroundColor: this.theme.colors.inputBg,
+      focusedTextColor: this.color("inputText"),
+      cursorColor: this.color("inputFocus"),
+    });
+    input.onContentChange = () => this.onManagerInputChange();
+    inputBox.add(input);
+    manager.box.add(inputBox);
+    manager.inputBox = inputBox;
+    manager.input = input;
+    input.focus();
+  }
+
+  private onManagerInputChange(): void {
+    const manager = this.manager;
+    const tab = manager?.tabs[manager.tabIndex];
+    if (!manager || tab?.kind !== "search") return;
+    const query = manager.input?.value.trim() ?? "";
+    manager.query = query;
+    clearTimeout(manager.debounce);
+    manager.debounce = undefined;
+    manager.controller?.abort();
+    manager.controller = undefined;
+    manager.searching = false;
+    manager.searchError = undefined;
+    if (!query) {
+      manager.results = [];
+      manager.resultIndex = 0;
+      this.renderManager();
+      return;
+    }
+    manager.results = [];
+    manager.resultIndex = 0;
+    manager.searching = true;
+    this.renderManager();
+    manager.debounce = setTimeout(() => {
+      void this.runManagerSearch(tab, query);
+    }, 250);
+  }
+
+  private async runManagerSearch(tab: ManagedSearchTab, query: string): Promise<void> {
+    const manager = this.manager;
+    if (!manager) return;
+    const controller = new AbortController();
+    manager.controller = controller;
+    try {
+      const results = await tab.search(query, controller.signal);
+      if (this.manager !== manager || controller.signal.aborted) return;
+      manager.results = results;
+      manager.resultIndex = 0;
+      manager.searching = false;
+      manager.searchError = undefined;
+    } catch (error) {
+      if (this.manager !== manager || controller.signal.aborted) return;
+      manager.searching = false;
+      manager.searchError = error instanceof Error ? error.message : String(error);
+    }
+    this.renderManager();
   }
 
   private closeManager(): void {
@@ -1462,6 +1678,7 @@ export class TuiApp {
       manager.tabRow = tabRow;
       manager.bodyBox = bodyBox;
     }
+    this.ensureManagerInput();
     this.syncManagerShell();
     this.renderManagerBody();
     this.updateFooter();
@@ -1482,8 +1699,13 @@ export class TuiApp {
         index === manager.tabIndex ? `[${candidate.title}]` : ` ${candidate.title} `,
       )
       .join(" ");
-    const rows = Math.min(8, Math.max(visible.length, 1));
-    manager.box.height = rows + 6;
+    const rows =
+      tab?.kind === "list"
+        ? Math.min(8, Math.max(visible.length, 1))
+        : tab?.kind === "search"
+          ? Math.min(6, Math.max(manager.results.length, 1))
+          : 1;
+    manager.box.height = rows + (tab?.kind === "list" ? 6 : 7);
   }
 
   private renderManagerBody(): void {
@@ -1492,19 +1714,52 @@ export class TuiApp {
     const body = manager.bodyBox;
     for (const child of [...body.getChildren()]) child.destroyRecursively();
     const tab = manager.tabs[manager.tabIndex];
-    if (!tab || tab.kind !== "list") return;
+    if (!tab) return;
+    const text = (content: string, fg: string): TextRenderable =>
+      new TextRenderable(this.renderer!, {
+        content,
+        fg,
+        wrapMode: "none",
+        truncate: true,
+        width: "100%",
+      });
+    if (tab.kind === "search") {
+      if (manager.searchError) {
+        body.add(text(manager.searchError, this.color("error")));
+      } else if (manager.searching) {
+        body.add(text("searching…", this.color("muted")));
+      } else if (manager.results.length === 0) {
+        body.add(
+          text(
+            manager.query ? "no results" : "type to search skills.sh",
+            this.color("muted"),
+          ),
+        );
+      }
+      const rows = Math.min(6, manager.results.length);
+      const start = Math.max(0, Math.min(manager.resultIndex - 2, manager.results.length - rows));
+      for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
+        const result = manager.results[start + rowIndex];
+        if (!result) continue;
+        const selected = start + rowIndex === manager.resultIndex;
+        body.add(
+          text(
+            `${selected ? "› " : "  "}${result.label}`,
+            selected ? this.color("accent") : this.color("fg"),
+          ),
+        );
+      }
+      body.add(text("↑↓ pick · enter install · esc back", this.color("muted")));
+      return;
+    }
+    if (tab.kind === "prompt") {
+      body.add(text("enter install · esc back", this.color("muted")));
+      return;
+    }
     const visible = this.visibleManagerItems();
     const rows = Math.min(8, Math.max(visible.length, 1));
     if (visible.length === 0) {
-      body.add(
-        new TextRenderable(this.renderer, {
-          content: "no matches",
-          fg: this.color("muted"),
-          wrapMode: "none",
-          truncate: true,
-          width: "100%",
-        }),
-      );
+      body.add(text("no matches", this.color("muted")));
     }
     const start = Math.max(0, Math.min(manager.index - 3, visible.length - rows));
     for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
@@ -1521,15 +1776,7 @@ export class TuiApp {
         }),
       );
     }
-    body.add(
-      new TextRenderable(this.renderer, {
-        content: "type to filter · space cycle · enter/esc close",
-        fg: this.color("muted"),
-        wrapMode: "none",
-        truncate: true,
-        width: "100%",
-      }),
-    );
+    body.add(text("type to filter · space cycle · enter/esc close", this.color("muted")));
   }
 
   private getClipboard(): ClipboardService | undefined {
