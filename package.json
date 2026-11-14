@@ -10,7 +10,7 @@
     "build": "tsc -b && node scripts/bundle.mjs",
     "typecheck": "tsc -b --pretty false && tsc -p tsconfig.test.json --pretty false",
     "test": "NODE_OPTIONS=--experimental-ffi vitest run",
-    "test:e2e": "node scripts/e2e-print.mjs",
+    "test:e2e": "node scripts/e2e-print.mjs && node scripts/e2e-read-image.mjs",
     "dev": "pnpm build && node --experimental-ffi packages/coding-agent/dist/cli.js"
   },
   "devDependencies": {
