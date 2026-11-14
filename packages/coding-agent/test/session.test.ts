@@ -94,3 +94,36 @@ describe("SessionManager", () => {
     expect(texts).toContain("recent question");
   });
 });
+describe("SessionManager.find", () => {
+  it("resolves by exact id, file path, and unique id prefix", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    const manager = await SessionManager.create(cwd, { home });
+    await manager.appendMessage(user("hi"));
+    const id = manager.sessionId;
+    const filePath = manager.filePath!;
+
+    expect((await SessionManager.find(cwd, id, { home }))?.sessionId).toBe(id);
+    expect((await SessionManager.find(cwd, filePath, { home }))?.sessionId).toBe(id);
+    // The status bar and `sessions list` show a short id; resuming has to work
+    // with exactly what the UI prints.
+    expect((await SessionManager.find(cwd, id.slice(0, 8), { home }))?.sessionId).toBe(id);
+  });
+
+  it("returns undefined for an ambiguous prefix", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    const a = await SessionManager.create(cwd, { home, sessionId: "abcd1111-0000-0000-0000-000000000000" });
+    await a.appendMessage(user("a"));
+    const b = await SessionManager.create(cwd, { home, sessionId: "abcd2222-0000-0000-0000-000000000000" });
+    await b.appendMessage(user("b"));
+    await expect(SessionManager.find(cwd, "abcd", { home })).rejects.toThrow(/ambiguous/i);
+  });
+
+  it("returns undefined when nothing matches", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    await SessionManager.create(cwd, { home });
+    expect(await SessionManager.find(cwd, "nosuchid", { home })).toBeUndefined();
+  });
+});

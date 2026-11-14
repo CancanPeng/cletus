@@ -95,3 +95,29 @@ describe("bash tool", () => {
     expect(log).toContain("line 3000");
   });
 });
+
+describe("bash tool environment", () => {
+  it("exports the model ref so nested cletus runs can resolve it", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "cletus-bash-env-"));
+    dirs.push(cwd);
+    const policy = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: true,
+      interactive: false,
+    });
+    const tool = createBashTool({
+      policy,
+      cwd,
+      home: cwd,
+      model: "aliyun-token-plan/deepseek-v4.1-flash-1017",
+      sessionId: "test",
+    });
+    const result = await tool.execute(
+      { command: "printf %s \"$CLETUS_MODEL\"" },
+      { cwd, toolCallId: "call-env", signal: new AbortController().signal, onUpdate: () => {} },
+    );
+    expect(result.content[0]?.text).toContain("aliyun-token-plan/deepseek-v4.1-flash-1017");
+  });
+});

@@ -31,7 +31,9 @@ export function createCoreTools(deps: CoreToolDeps): AgentTool[] {
       policy: deps.policy,
       cwd: deps.cwd,
       home: deps.home,
-      model: `${deps.model.provider}/${deps.model.id}`,
+      // Export the same key resolveModel matches on, so a cletus launched
+      // from this bash tool can resolve CLETUS_MODEL back to this model.
+      model: deps.model.ref ?? `${deps.model.provider}/${deps.model.id}`,
       sessionId: deps.sessionId,
     }),
     createGrepTool({ policy: deps.policy, cwd: deps.cwd }),

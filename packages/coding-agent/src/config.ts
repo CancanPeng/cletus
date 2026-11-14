@@ -205,6 +205,31 @@ export function resolveApiKey(
   return undefined;
 }
 
+/**
+ * Accepts every spelling a model is referred to by: the configured `ref`,
+ * `provider/id`, or a bare `id`. The bash tool exports `CLETUS_MODEL` as
+ * `provider/id`, so nested cletus runs depend on that form resolving.
+ */
+function findModel(
+  config: CletusConfig,
+  wanted: string,
+  keyOf: (model: CletusConfig["models"][number]) => string,
+): CletusConfig["models"][number] | undefined {
+  const byRef = config.models.find((model) => keyOf(model) === wanted);
+  if (byRef) return byRef;
+  const byProvider = config.models.find(
+    (model) => `${model.provider}/${model.id}` === wanted,
+  );
+  if (byProvider) return byProvider;
+  const byId = config.models.filter((model) => model.id === wanted);
+  if (byId.length === 1) return byId[0];
+  if (byId.length > 1) {
+    const refs = byId.map((model) => keyOf(model)).join(", ");
+    throw new ConfigError(`Ambiguous model: ${wanted} (matches ${refs})`);
+  }
+  return undefined;
+}
+
 export function resolveModel(
   config: CletusConfig,
   _auth: AuthStore,
@@ -218,9 +243,7 @@ export function resolveModel(
   const wanted = ref ?? process.env["CLETUS_MODEL"] ?? config.defaultModel;
   const keyOf = (model: CletusConfig["models"][number]): string =>
     model.ref ?? `${model.provider}/${model.id}`;
-  const source = wanted
-    ? config.models.find((model) => keyOf(model) === wanted)
-    : config.models[0];
+  const source = wanted ? findModel(config, wanted, keyOf) : config.models[0];
   if (!source) throw new ConfigError(`Unknown model: ${wanted}`);
   const provider = source.provider;
   const baseUrl = source.baseUrl ?? config.providers[provider].baseUrl;

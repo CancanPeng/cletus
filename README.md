@@ -114,8 +114,27 @@ Configure in `~/.cletus/config.json`:
 
 Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a command. `Enter` on a complete command such as `/quit` runs it immediately.
 
-`/help`, `/quit`, `/new`, `/resume`, `/compact`, `/model`, `/theme`, `/symbols`, `/keys`, `/skills`, `/permissions`, `/yolo`, `/verbose`, `/thinking`, `/mcp`, `/reload`, plus each user-invocable skill by its own name (for example `/using-git-worktrees`) and prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
+`/help`, `/quit`, `/new`, `/resume`, `/fork`, `/compact`, `/model`, `/theme`, `/symbols`, `/keys`, `/skills`, `/permissions`, `/yolo`, `/verbose`, `/thinking`, `/mcp`, `/reload`, plus each user-invocable skill by its own name (for example `/using-git-worktrees`) and prompt templates from `~/.cletus/prompts` and `.cletus/prompts`.
 
+## Sessions
+
+`/new` opens a fresh session in the current directory, `/resume` lists the sessions recorded for it, and `/fork` branches an existing conversation. All three refuse to run while the agent is working.
+
+`/resume` restores the conversation into the transcript, not just into context, and marks the session you are already in with `current`. Sessions are per-directory, newest first. Non-interactive equivalents:
+
+```bash
+cletus --continue            # reopen the most recent session here
+cletus --resume <id|path>    # reopen a specific one (full id, unique short prefix, or file path)
+cletus sessions list         # ids to pass to --resume
+```
+
+## Forking
+
+`/fork` copies the current conversation into a new session file and switches to it, leaving the original untouched (`cletus --resume <id>` still reaches it).
+
+The picker lists the current position first, then each of your messages newest first. Choosing `Now` clones the whole branch; choosing an earlier message clones only what came before it, so the rest is dropped from the new session and the transcript rewinds to match. Tool calls are replayed with their results, and a call cut off by the fork point is shown as an error.
+
+Forking is refused while the agent is running.
 ## Skills
 
 `/skills` opens a single popup manager inspired by Claude Code. Use Up/Down to move, `Space` to cycle visibility, and `Enter` or `Esc` to close. Changes are saved immediately to `~/.cletus/config.json`.

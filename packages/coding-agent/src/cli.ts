@@ -31,6 +31,10 @@ import { loadMcpConfig } from "./mcp/config.js";
 import { PermissionPolicy } from "./permissions/policy.js";
 import { AgentSession } from "./session/session.js";
 import { SessionManager } from "./session/manager.js";
+import { buildProjection } from "./session/context.js";
+import { runFork } from "./session/fork.js";
+import { projectionBlocks } from "./session/transcript.js";
+import { sessionLabel } from "./session/label.js";
 import { expandTemplate } from "./resources/prompts.js";
 
 declare const __CLETUS_VERSION__: string | undefined;
@@ -43,6 +47,7 @@ const BUILTIN_COMMANDS = [
   "quit",
   "new",
   "resume",
+  "fork",
   "compact",
   "model",
   "theme",
@@ -446,6 +451,20 @@ async function runTui(opts: {
     app?.setHeader(headerFor(opts.cwd, session, branch, currentTheme));
   };
 
+  // A fork starts from a projection, not from events, so the transcript has to
+  // be rebuilt from the new branch. Replayed blocks carry their own ids, so
+  // later streaming updates never collide with them.
+  const renderHistory = (manager: SessionManager): void => {
+    app?.clearTranscript();
+    assistantId = undefined;
+    assistantText = "";
+    thinkingText = "";
+    if (!app) return;
+    for (const block of projectionBlocks(buildProjection(manager).messages)) {
+      app.appendBlock(block);
+    }
+  };
+
   const commands: SlashCommand[] = [
     { name: "quit", description: "Exit cletus", run: () => {
         session?.abort();
@@ -455,27 +474,69 @@ async function runTui(opts: {
       name: "new",
       description: "Start a new session",
       run: async () => {
+        if (session?.agent.state.isStreaming) {
+          app?.notify("Cannot /new while running", "warn");
+          return;
+        }
         const manager = await SessionManager.create(opts.cwd, { home: opts.home });
         await attach(manager);
         app?.clearTranscript();
+        app?.notify(`New session ${manager.sessionId.slice(0, 8)}`);
       },
     },
     {
       name: "resume",
       description: "Resume a session",
       run: async () => {
-        const infos = await SessionManager.list(opts.cwd, { home: opts.home });
+        if (session?.agent.state.isStreaming) {
+          app?.notify("Cannot /resume while running", "warn");
+          return;
+        }
+        const infos = await SessionManager.list(opts.cwd, {
+          home: opts.home,
+          limit: Number.MAX_SAFE_INTEGER,
+        });
+        if (infos.length === 0) {
+          app?.notify("No sessions to resume", "warn");
+          return;
+        }
+        const current = session?.manager.filePath;
         const choice = await app?.select(
           "Resume session",
           infos.map((info) => ({
-            label: `${new Date(info.timestamp).toLocaleString()} ${info.firstUserText.slice(0, 50)}`,
+            label: sessionLabel(info, info.filePath === current),
             value: info.filePath,
           })),
         );
         if (!choice) return;
+        if (choice === session?.manager.filePath) {
+          app?.notify("Already in this session");
+          return;
+        }
         const manager = await SessionManager.open(choice);
         await attach(manager);
-        app?.clearTranscript();
+        renderHistory(manager);
+        app?.notify(`Resumed ${manager.sessionId.slice(0, 8)}`);
+      },
+    },
+    {
+      name: "fork",
+      description: "Fork the conversation at a message",
+      run: async () => {
+        if (!session) return;
+        const outcome = await runFork({
+          manager: session.manager,
+          isStreaming: session.agent.state.isStreaming,
+          select: async (title, items) => app?.select(title, items),
+        });
+        if (outcome.status === "busy") {
+          app?.notify("Cannot /fork while running", "warn");
+          return;
+        }
+        if (outcome.status === "cancelled") return;
+        await attach(outcome.manager);
+        renderHistory(outcome.manager);
+        app?.notify(`Forked into ${outcome.manager.sessionId.slice(0, 8)}`);
       },
     },
     {
@@ -1359,10 +1420,9 @@ async function main(): Promise<number> {
 
   let manager: SessionManager;
   if (parsed.values.resume) {
-    const infos = await SessionManager.list(cwd, { home, limit: Number.MAX_SAFE_INTEGER });
-    const found = infos.find((info) => info.id === parsed.values.resume || info.filePath === parsed.values.resume);
+    const found = await SessionManager.find(cwd, parsed.values.resume, { home });
     if (!found) throw new ConfigError(`Session not found: ${parsed.values.resume}`);
-    manager = await SessionManager.open(found.filePath);
+    manager = found;
   } else if (parsed.values.continue) {
     const infos = await SessionManager.list(cwd, { home });
     const latest = infos[0];

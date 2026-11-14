@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { AgentMessage, JsonValue } from "@cletus/agent";
+import { ConfigError } from "../config.js";
 import type {
   CompactionEntry,
   CustomEntry,
@@ -189,6 +190,36 @@ export class SessionManager {
     }
     infos.sort((a, b) => b.mtime - a.mtime);
     return infos.slice(0, opts.limit ?? 50).map(({ mtime: _mtime, ...info }) => info);
+  }
+
+  /**
+   * Resolves a session the way users and the UI refer to it: a full id, a
+   * session file path, or a short id prefix such as the one the status bar
+   * and `cletus sessions list` print. Ambiguous prefixes are an error rather
+   * than a silent pick, and an unmatched reference returns undefined.
+   */
+  static async find(
+    cwd: string,
+    reference: string,
+    opts: { home?: string } = {},
+  ): Promise<SessionManager | undefined> {
+    const infos = await SessionManager.list(cwd, {
+      ...opts,
+      limit: Number.MAX_SAFE_INTEGER,
+    });
+    const exact = infos.find(
+      (info) => info.id === reference || info.filePath === reference,
+    );
+    if (exact) return SessionManager.open(exact.filePath);
+    const matches = infos.filter(
+      (info) => info.id.startsWith(reference) || info.filePath.includes(reference),
+    );
+    if (matches.length > 1) {
+      const ids = matches.map((info) => info.id.slice(0, 8)).join(", ");
+      throw new ConfigError(`Ambiguous session: ${reference} (matches ${ids})`);
+    }
+    const found = matches[0];
+    return found ? SessionManager.open(found.filePath) : undefined;
   }
 
   private newId(): string {
