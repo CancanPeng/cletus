@@ -103,6 +103,18 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("submits an absolute file path as a message instead of a command", async () => {
+    const ctx = await setupApp();
+    const path = "/var/folders/cv/tmp/orca-paste-123.png";
+    ctx.mockInput.typeText(path);
+    ctx.mockInput.pressEnter();
+    await ctx.flush();
+    expect(ctx.submissions).toEqual([path]);
+    expect(ctx.captureCharFrame()).not.toContain("Unknown command");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("honors a keybinding override", async () => {
     const test = await createTestRenderer({ width: 100, height: 30, kittyKeyboard: true, exitOnCtrlC: false });
     let aborts = 0;

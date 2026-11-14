@@ -1108,7 +1108,10 @@ export class TuiApp {
     this.textarea?.setText("");
     this.historyIndex = -1;
     this.historyDraft = "";
-    if (text.startsWith("/")) {
+    // Command names never contain "/"; anything else (e.g. an absolute
+    // file path like /var/folders/.../paste.png) is a regular message.
+    const commandToken = text.split(" ", 1)[0] ?? "";
+    if (text.startsWith("/") && !commandToken.slice(1).includes("/")) {
       this.runCommand(text);
       return;
     }
