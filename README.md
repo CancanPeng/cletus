@@ -91,6 +91,8 @@ Paste a screenshot with the paste key: it is saved next to the session file and 
 
 Known limits: images are re-sent with the full history on every turn, so many large screenshots across many turns can hit the provider's request size limit (~32MB on Anthropic); use `/compact` or `/new` when that happens. Models marked `"supportsImages": false` in `~/.cletus/config.json` get a text placeholder instead of the image.
 
+The `read` tool also sees images: reading a `.png` or `.jpeg` returns the picture to the model along with a one-line summary (format, pixel size, absolute path), so it can inspect a screenshot in your project without you pasting it. Files are detected by content, not extension. The 5MB per-image limit applies here too, and images over it are rejected rather than truncated. Non-vision models get the summary plus an ignored-image placeholder.
+
 ## Status bar
 
 Icons (unicode preset shown; the default `nerd` preset uses Nerd Font glyphs): `◈` model, `⌂` cwd, `⎇` git branch, `✓` ready, `◷` duration, `▤` context usage, `≡` queued, `▲` YOLO, `⚑` permission, `❖` skills manager.

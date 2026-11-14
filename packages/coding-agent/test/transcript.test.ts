@@ -111,4 +111,32 @@ describe("projectionBlocks", () => {
       { id: "h1", kind: "assistant", text: "", thinking: "pondering", done: true },
     ]);
   });
+
+  it("renders tool result images as a placeholder line", () => {
+    const messages: AgentMessage[] = [
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "c1", name: "read", arguments: { path: "a.png" } }],
+        provider: "openai",
+        model: "fake",
+        usage,
+        stopReason: "toolUse",
+        timestamp: 1,
+      },
+      {
+        role: "toolResult",
+        toolCallId: "c1",
+        toolName: "read",
+        content: [
+          { type: "text", text: "a.png — image/png" },
+          { type: "image", mediaType: "image/png", path: "/tmp/a.png" },
+        ],
+        isError: false,
+        timestamp: 2,
+      },
+    ];
+    const blocks = projectionBlocks(messages);
+    const tool = blocks.find((block) => block.kind === "tool");
+    expect(tool).toMatchObject({ output: "a.png — image/png\n[图片: a.png  image/png]" });
+  });
 });
