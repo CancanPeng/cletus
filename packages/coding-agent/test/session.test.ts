@@ -1,10 +1,21 @@
 import { mkdtemp, readFile, rm, appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentMessage } from "@cletus/agent";
+import {
+  AssistantEventStream,
+  assistantMessage,
+  type LlmContext,
+  type Model,
+  type StreamFn,
+} from "@cletus/ai";
 import { SessionManager, encodeCwd } from "../src/session/manager.js";
 import { buildProjection } from "../src/session/context.js";
+import { AgentSession } from "../src/session/session.js";
+import { createDefaultConfig } from "../src/config.js";
+import { PermissionPolicy } from "../src/permissions/policy.js";
+import { ResourceLoader } from "../src/resources/index.js";
 
 const dirs: string[] = [];
 
@@ -125,5 +136,95 @@ describe("SessionManager.find", () => {
     const cwd = await temp();
     await SessionManager.create(cwd, { home });
     expect(await SessionManager.find(cwd, "nosuchid", { home })).toBeUndefined();
+  });
+});
+
+describe("image attachments", () => {
+  it("saveAttachment writes bytes under the session directory and returns absolute path", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    const manager = await SessionManager.create(cwd, { home });
+    const att = await manager.saveAttachment(new Uint8Array([1, 2, 3]), "png");
+    expect(att.mediaType).toBe("image/png");
+    expect(isAbsolute(att.path)).toBe(true);
+    expect(att.path).toContain(manager.sessionId);
+    expect(await readFile(att.path)).toEqual(Buffer.from([1, 2, 3]));
+    const jpg = await manager.saveAttachment(new Uint8Array([4]), "jpg");
+    expect(jpg.mediaType).toBe("image/jpeg");
+  });
+
+  it("persists user images across open and still loads old files without images", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    const manager = await SessionManager.create(cwd, { home });
+    const att = await manager.saveAttachment(new Uint8Array([1]), "png");
+    await manager.appendMessage({ role: "user", content: "look", timestamp: 1, images: [att] });
+    const opened = await SessionManager.open(manager.filePath!);
+    const branch = opened.getBranch();
+    const message = branch[0];
+    expect(message?.type).toBe("message");
+    if (message?.type === "message" && message.message.role === "user") {
+      expect(message.message.images).toEqual([att]);
+    }
+    // Old-format line without images must keep loading.
+    await appendFile(
+      manager.filePath!,
+      `${JSON.stringify({ type: "message", id: "legacy01", parentId: opened.getLeafId(), timestamp: new Date().toISOString(), message: { role: "user", content: "old", timestamp: 2 } })}\n`,
+      "utf8",
+    );
+    const reopened = await SessionManager.open(manager.filePath!);
+    expect(reopened.getBranch()).toHaveLength(2);
+  });
+
+  it("strips images for models without vision in the request projection", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    const manager = await SessionManager.create(cwd, { home });
+    const att = await manager.saveAttachment(new Uint8Array([1]), "png");
+    const model: Model = {
+      provider: "openai",
+      id: "no-vision",
+      baseUrl: "http://localhost",
+      contextWindow: 100000,
+      maxOutputTokens: 1000,
+      supportsImages: false,
+    };
+    let seen: LlmContext | undefined;
+    const streamFn: StreamFn = (_model, context) => {
+      seen = context;
+      const stream = new AssistantEventStream();
+      stream.end(assistantMessage(model, [{ type: "text", text: "ok" }], "stop"));
+      return stream;
+    };
+    const session = await AgentSession.create({
+      cwd,
+      home,
+      config: createDefaultConfig(),
+      auth: { keys: {} },
+      model,
+      sessionManager: manager,
+      permissions: new PermissionPolicy({
+        cwd,
+        readOnlyRoots: [],
+        allowWrite: [],
+        yolo: true,
+        interactive: false,
+      }),
+      resources: new ResourceLoader(cwd, home),
+      streamFn,
+    });
+    await session.prompt("look", [att]);
+    const userMessage = seen?.messages.find((message) => message.role === "user");
+    expect(userMessage?.role).toBe("user");
+    if (userMessage?.role === "user") {
+      expect(userMessage.content).toContain("[图片已忽略");
+      expect(userMessage.images).toBeUndefined();
+    }
+    // The persisted message keeps the attachment for later vision models.
+    const stored = manager.getBranch()[0];
+    if (stored?.type === "message" && stored.message.role === "user") {
+      expect(stored.message.images).toEqual([att]);
+    }
+    await session.dispose();
   });
 });

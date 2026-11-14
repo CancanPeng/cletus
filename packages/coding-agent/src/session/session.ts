@@ -2,6 +2,7 @@ import {
   streamSimple,
   estimateContextTokens,
   type AssistantMessage,
+  type ImageAttachment,
   type LlmContext,
   type Model,
   type StreamFn,
@@ -224,6 +225,20 @@ export class AgentSession {
     return undefined;
   }
 
+  /**
+   * Non-vision models get a text placeholder instead of image references.
+   * Only touches messages when supportsImages is explicitly false; persisted
+   * messages keep their attachments so switching models restores them.
+   */
+  private projectForModel(messages: AgentMessage[]): AgentMessage[] {
+    if (this.model.supportsImages !== false) return messages;
+    return messages.map((message) => {
+      if (message.role !== "user" || !message.images?.length) return message;
+      const { images: _images, ...rest } = message;
+      return { ...rest, content: `${rest.content}\n[图片已忽略：当前模型不支持图片]` };
+    });
+  }
+
   private async prepareRequest(ctx: {
     systemPrompt: string;
     messages: AgentMessage[];
@@ -238,7 +253,7 @@ export class AgentSession {
       contextFiles: this.resources.contextFiles,
       skills: this.resources.skills,
     });
-    const converted = ctx.messages.map((message) =>
+    const converted = this.projectForModel(ctx.messages).map((message) =>
       message.role === "custom"
         ? {
             role: "user" as const,
@@ -271,22 +286,25 @@ export class AgentSession {
       });
       const projection = buildProjection(this.manager);
       this.agent.replaceProjection(projection.messages);
-      return { systemPrompt: this.systemPrompt, messages: projection.messages };
+      return {
+        systemPrompt: this.systemPrompt,
+        messages: this.projectForModel(projection.messages),
+      };
     }
-    return { systemPrompt: this.systemPrompt, messages: ctx.messages };
+    return { systemPrompt: this.systemPrompt, messages: this.projectForModel(ctx.messages) };
   }
 
-  async prompt(text: string): Promise<void> {
+  async prompt(text: string, images?: ImageAttachment[]): Promise<void> {
     await this.options.extensions?.emit({ type: "input", text });
-    await this.agent.prompt(text);
+    await this.agent.prompt(text, images);
   }
 
-  steer(text: string): void {
-    this.agent.steer(text);
+  steer(text: string, images?: ImageAttachment[]): void {
+    this.agent.steer(text, images);
   }
 
-  followUp(text: string): void {
-    this.agent.followUp(text);
+  followUp(text: string, images?: ImageAttachment[]): void {
+    this.agent.followUp(text, images);
   }
 
   abort(): void {
@@ -332,7 +350,7 @@ export class AgentSession {
 
   getContextUsage(): { used: number; window: number } {
     const projection = buildProjection(this.manager).messages;
-    const messages: LlmContext["messages"] = projection.map((message) =>
+    const messages: LlmContext["messages"] = this.projectForModel(projection).map((message) =>
       message.role === "custom"
         ? {
             role: "user",

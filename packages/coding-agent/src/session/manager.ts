@@ -1,8 +1,9 @@
 import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { randomBytes, randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { AgentMessage, JsonValue } from "@cletus/agent";
+import type { ImageAttachment } from "@cletus/ai";
 import { ConfigError } from "../config.js";
 import type {
   CompactionEntry,
@@ -236,6 +237,16 @@ export class SessionManager {
     if (this.filePath) await appendFile(this.filePath, `${JSON.stringify(entry)}\n`, "utf8");
     this.entries.push(entry);
     this.leaf = entry.id;
+  }
+
+  async saveAttachment(bytes: Uint8Array, ext: "png" | "jpg"): Promise<ImageAttachment> {
+    const dir = this.filePath
+      ? join(dirname(this.filePath), `${this.sessionId}.attachments`)
+      : join(this.home, "tmp");
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, `${randomBytes(4).toString("hex")}.${ext}`);
+    await writeFile(path, bytes);
+    return { mediaType: ext === "png" ? "image/png" : "image/jpeg", path };
   }
 
   private appendEntry(
