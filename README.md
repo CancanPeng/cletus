@@ -93,7 +93,7 @@ Known limits: images are re-sent with the full history on every turn, so many la
 
 ## Status bar
 
-Icons (unicode preset shown; the default `nerd` preset uses Nerd Font glyphs): `◆` app, `◈` model, `⌂` cwd, `⎇` git branch, `▣` session, `✓` ready, `▤` context usage, `◷` last duration, `≡` queued, `▲` YOLO, `⚑` permission, `❖` skills manager.
+Icons (unicode preset shown; the default `nerd` preset uses Nerd Font glyphs): `◈` model, `⌂` cwd, `⎇` git branch, `✓` ready, `◷` duration, `▤` context usage, `≡` queued, `▲` YOLO, `⚑` permission, `❖` skills manager.
 
 Symbol presets:
 

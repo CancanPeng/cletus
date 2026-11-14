@@ -150,7 +150,7 @@ describe("TuiApp", () => {
     expect(theme.name).toBe("dark");
     expect(theme.colors.inputBorder).toBeTruthy();
     const symbols = getTheme("dark", { preset: "constructor" as never, overrides: { toString: "x" } });
-    expect(symbols.symbol("app")).toBe("\uf120");
+    expect(symbols.symbol("model")).toBe("\uf2db");
   });
 
   it("switches symbol presets", async () => {
@@ -159,8 +159,8 @@ describe("TuiApp", () => {
       preset: "ascii",
       overrides: { ready: "OK" },
     });
-    expect(getTheme("dark").symbol("app")).toBe("\uf120");
-    expect(ascii.symbol("app")).toBe("*");
+    expect(getTheme("dark").symbol("model")).toBe("\uf2db");
+    expect(ascii.symbol("model")).toBe("M");
     expect(ascii.symbol("ready")).toBe("OK");
     ctx.app.setTheme(ascii);
     await ctx.flush();

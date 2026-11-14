@@ -1260,14 +1260,14 @@ export class TuiApp {
         ? `${this.symbol("duration")} ${formatElapsed(Date.now() - this.status.startedAt)}`
         : "";
       const suffix = [
-        usage,
         elapsed,
+        usage,
         this.status.queue > 0 ? `${this.symbol("queue")} ${this.status.queue} queued` : "",
         this.yolo ? `${this.symbol("yolo")} YOLO` : "",
       ].filter(Boolean).join(" · ");
       return `${this.theme.spinner[this.spinner % this.theme.spinner.length] ?? "⠋"} ${activity}${suffix ? ` · ${suffix}` : ""}`;
     }
-    return `${this.symbol("ready")}${usage ? ` · ${usage}` : ""}${this.status.duration ? ` · ${this.symbol("duration")} ${this.status.duration}` : ""}${this.verbose ? " · verbose" : ""}${this.yolo ? ` · ${this.symbol("yolo")} YOLO` : ""}`;
+    return `${this.symbol("ready")}${this.status.duration ? ` · ${this.symbol("duration")} ${this.status.duration}` : ""}${usage ? ` · ${usage}` : ""}${this.verbose ? " · verbose" : ""}${this.yolo ? ` · ${this.symbol("yolo")} YOLO` : ""}`;
   }
 
   private footerRightContent(): string {

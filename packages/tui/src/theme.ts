@@ -21,11 +21,9 @@ export type ThemeToken =
 
 export type SymbolPreset = "unicode" | "nerd" | "ascii";
 export type SymbolKey =
-  | "app"
   | "model"
   | "cwd"
   | "branch"
-  | "session"
   | "ready"
   | "context"
   | "duration"
@@ -52,11 +50,9 @@ export type Theme = {
 
 const SYMBOLS: Record<SymbolPreset, Record<SymbolKey, string>> = {
   unicode: {
-    app: "◆",
     model: "◈",
     cwd: "⌂",
     branch: "⎇",
-    session: "▣",
     ready: "✓ ready",
     context: "▤",
     duration: "◷",
@@ -73,11 +69,9 @@ const SYMBOLS: Record<SymbolPreset, Record<SymbolKey, string>> = {
     toolError: "✗",
   },
   nerd: {
-    app: "\uf120",
     model: "\uf2db",
     cwd: "\uf07b",
     branch: "\ue725",
-    session: "\uf2c0",
     ready: "\uf00c ready",
     context: "\uf1c0",
     duration: "\uf017",
@@ -94,11 +88,9 @@ const SYMBOLS: Record<SymbolPreset, Record<SymbolKey, string>> = {
     toolError: "\uf00d",
   },
   ascii: {
-    app: "*",
     model: "M",
     cwd: "cwd",
     branch: "git",
-    session: "id",
     ready: "ready",
     context: "ctx",
     duration: "time",

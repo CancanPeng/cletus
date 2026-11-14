@@ -1,14 +1,13 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning --experimental-ffi
 import { access, readFile, mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { parseArgs } from "node:util";
 import type { AgentEvent, AgentMessage } from "@cletus/agent";
 import type { Model } from "@cletus/ai";
-import type { TuiApp as TuiAppType, SlashCommand, Theme } from "@cletus/tui";
+import type { TuiApp as TuiAppType, SlashCommand } from "@cletus/tui";
 import {
   ConfigError,
   authPath,
@@ -33,6 +32,7 @@ import { AgentSession } from "./session/session.js";
 import { SessionManager } from "./session/manager.js";
 import { buildProjection } from "./session/context.js";
 import { runFork } from "./session/fork.js";
+import { headerFor } from "./session/header.js";
 import { projectionBlocks } from "./session/transcript.js";
 import { sessionLabel } from "./session/label.js";
 import { expandTemplate } from "./resources/prompts.js";
@@ -191,24 +191,6 @@ function contextLabel(session: AgentSession): string {
   return `${shortTokens(usage.used)}/${shortTokens(usage.window)} ${Math.min(100, percent)}%`;
 }
 
-function headerFor(
-  cwd: string,
-  session: AgentSession,
-  branch: string | undefined,
-  theme: Theme,
-): string {
-  const home = homedir();
-  const shortCwd = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
-  const parts = [
-    `${theme.symbol("app")} cletus`,
-    `${theme.symbol("model")} ${session.model.ref ?? `${session.model.provider}/${session.model.id}`}`,
-    `${theme.symbol("cwd")} ${shortCwd}`,
-  ];
-  if (branch) parts.push(`${theme.symbol("branch")} ${branch}`);
-  parts.push(`${theme.symbol("session")} ${session.manager.sessionId.slice(0, 8)}`);
-  return parts.join(" · ");
-}
-
 function eventText(message: AgentMessage): string {
   if (message.role === "assistant") {
     return message.content
@@ -283,7 +265,7 @@ async function runTui(opts: {
 
   const refreshHeader = async (): Promise<void> => {
     branch = await gitBranch(opts.cwd);
-    if (session) app?.setHeader(headerFor(opts.cwd, session, branch, currentTheme));
+    if (session) app?.setHeader(headerFor(opts.cwd, session.model, branch, currentTheme));
   };
 
   const confirm = async (req: { summary: string }): Promise<"allow" | "session" | "deny"> =>
@@ -448,7 +430,7 @@ async function runTui(opts: {
       onNotice: (text, level) => app?.notify(text, level),
     });
     unsubscribe = session.subscribe(mapEvent);
-    app?.setHeader(headerFor(opts.cwd, session, branch, currentTheme));
+    app?.setHeader(headerFor(opts.cwd, session.model, branch, currentTheme));
   };
 
   // A fork starts from a projection, not from events, so the transcript has to
