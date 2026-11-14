@@ -76,7 +76,7 @@ describe("runAgentLoop", () => {
       }),
     };
     await runAgentLoop(
-      ["go"],
+      [{ text: "go" }],
       { systemPrompt: "s", messages: [], tools: [tool] },
       {
         model,
@@ -142,7 +142,7 @@ describe("runAgentLoop", () => {
       },
     };
     await runAgentLoop(
-      ["go"],
+      [{ text: "go" }],
       { systemPrompt: "s", messages: [], tools: [tool] },
       {
         model,
@@ -188,7 +188,7 @@ describe("runAgentLoop", () => {
       },
     };
     await runAgentLoop(
-      ["go"],
+      [{ text: "go" }],
       { systemPrompt: "s", messages: [], tools: [tool] },
       {
         model,
@@ -230,7 +230,7 @@ describe("runAgentLoop", () => {
       execute: async () => ({ content: [{ type: "text", text: "bye" }], terminate: true }),
     };
     await runAgentLoop(
-      ["go"],
+      [{ text: "go" }],
       { systemPrompt: "s", messages: [], tools: [tool] },
       {
         model,
@@ -254,7 +254,7 @@ describe("runAgentLoop", () => {
       throw new Error("boom");
     };
     await runAgentLoop(
-      ["go"],
+      [{ text: "go" }],
       { systemPrompt: "s", messages: [], tools: [] },
       {
         model,
@@ -279,6 +279,65 @@ describe("runAgentLoop", () => {
         expect(last.stopReason).toBe("error");
         expect(last.errorMessage).toContain("boom");
       }
+    }
+  });
+
+  it("carries images on the initial prompt and steered messages", async () => {
+    const img = { mediaType: "image/png" as const, path: "/tmp/shot.png" };
+    const events: AgentEvent[] = [];
+    let call = 0;
+    const streamFn: StreamFn = (): AssistantEventStream => {
+      call += 1;
+      if (call === 1) {
+        return fakeStream(
+          assistantMessage(
+            model,
+            [{ type: "toolCall", id: "call_1", name: "probe", arguments: {} }],
+            "toolUse",
+          ),
+        );
+      }
+      return fakeStream(final("done"));
+    };
+    const tool: AgentTool = {
+      name: "probe",
+      description: "probe",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+    };
+    let drained = false;
+    await runAgentLoop(
+      [{ text: "hi", images: [img] }],
+      { systemPrompt: "s", messages: [], tools: [tool] },
+      {
+        model,
+        streamFn,
+        tools: [tool],
+        convertToLlm: (messages) =>
+          messages.filter((message) => message.role !== "custom") as never,
+        drainSteering: () => {
+          if (drained) return [];
+          drained = true;
+          return [{ text: "steer", images: [img] }];
+        },
+      },
+      async (event) => {
+        events.push(event);
+      },
+      new AbortController().signal,
+    );
+    const end = events.find((event) => event.type === "agent_end");
+    expect(end?.type).toBe("agent_end");
+    if (end?.type === "agent_end") {
+      const users = end.messages.filter((message) => message.role === "user");
+      expect(users).toHaveLength(2);
+      for (const user of users) {
+        if (user.role === "user") expect(user.images).toEqual([img]);
+      }
+      expect(users.map((user) => (user.role === "user" ? user.content : ""))).toEqual([
+        "hi",
+        "steer",
+      ]);
     }
   });
 });

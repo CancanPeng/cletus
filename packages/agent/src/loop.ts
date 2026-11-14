@@ -15,12 +15,18 @@ import type {
   AgentLoopConfig,
   AgentMessage,
   AgentTool,
+  PromptInput,
 } from "./types.js";
 
 export type Emit = (event: AgentEvent) => Promise<void>;
 
-function userMessage(text: string): AgentMessage {
-  return { role: "user", content: text, timestamp: Date.now() };
+function userMessage(input: PromptInput): AgentMessage {
+  return {
+    role: "user",
+    content: input.text,
+    timestamp: Date.now(),
+    ...(input.images?.length ? { images: input.images } : {}),
+  };
 }
 
 async function emitMessage(emit: Emit, message: AgentMessage): Promise<void> {
@@ -105,7 +111,7 @@ async function consumeStream(
 }
 
 export async function runAgentLoop(
-  prompts: string[],
+  prompts: PromptInput[],
   context: { systemPrompt: string; messages: AgentMessage[]; tools: AgentTool[] },
   config: AgentLoopConfig,
   emit: Emit,
@@ -118,9 +124,9 @@ export async function runAgentLoop(
   const maxTurns = config.maxTurns ?? 100;
   let turn = 0;
 
-  const appendQueued = async (texts: string[]): Promise<void> => {
-    for (const text of texts) {
-      const message = userMessage(text);
+  const appendQueued = async (inputs: PromptInput[]): Promise<void> => {
+    for (const input of inputs) {
+      const message = userMessage(input);
       messages.push(message);
       await emitMessage(emit, message);
     }

@@ -1,4 +1,4 @@
-import type { Message, Model } from "@cletus/ai";
+import type { ImageAttachment, Message, Model } from "@cletus/ai";
 import { runAgentLoop } from "./loop.js";
 import type {
   AgentEvent,
@@ -6,6 +6,7 @@ import type {
   AgentOptions,
   AgentState,
   AgentTool,
+  PromptInput,
 } from "./types.js";
 
 export class Agent {
@@ -18,8 +19,8 @@ export class Agent {
   private running = false;
   private controller: AbortController | undefined;
   private abortRequested = false;
-  private readonly steering: string[] = [];
-  private readonly followUps: string[] = [];
+  private readonly steering: PromptInput[] = [];
+  private readonly followUps: PromptInput[] = [];
   private idle = Promise.resolve();
   private resolveIdle: (() => void) | undefined;
 
@@ -58,11 +59,11 @@ export class Agent {
     }
   }
 
-  async prompt(text: string): Promise<void> {
+  async prompt(text: string, images?: ImageAttachment[]): Promise<void> {
     if (this.running) throw new Error("Agent is already running; use steer() or followUp()");
     // Queued steering/follow-ups stay queued: the loop drains them per turn,
     // so nothing is lost if the run fails before the first drain.
-    await this.run([text]);
+    await this.run([{ text, ...(images?.length ? { images } : {}) }]);
   }
 
   async continue(): Promise<void> {
@@ -75,12 +76,12 @@ export class Agent {
     await this.run([]);
   }
 
-  steer(text: string): void {
-    this.steering.push(text);
+  steer(text: string, images?: ImageAttachment[]): void {
+    this.steering.push({ text, ...(images?.length ? { images } : {}) });
   }
 
-  followUp(text: string): void {
-    this.followUps.push(text);
+  followUp(text: string, images?: ImageAttachment[]): void {
+    this.followUps.push({ text, ...(images?.length ? { images } : {}) });
   }
 
   abort(): void {
@@ -126,7 +127,7 @@ export class Agent {
     );
   }
 
-  private async run(prompts: string[]): Promise<void> {
+  private async run(prompts: PromptInput[]): Promise<void> {
     this.running = true;
     this.controller = new AbortController();
     if (this.abortRequested) {

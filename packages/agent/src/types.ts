@@ -1,4 +1,5 @@
 import type {
+  ImageAttachment,
   JsonSchema,
   Message,
   Model,
@@ -6,6 +7,8 @@ import type {
   TextContent,
   ToolCallContent,
 } from "@cletus/ai";
+
+export type PromptInput = { text: string; images?: ImageAttachment[] };
 
 export type CustomMessage = {
   role: "custom";
@@ -119,8 +122,8 @@ export type AgentLoopConfig = {
   prepareRequest?: AgentOptions["prepareRequest"];
   beforeToolCall?: AgentOptions["beforeToolCall"];
   afterToolCall?: AgentOptions["afterToolCall"];
-  drainSteering?: () => string[];
-  drainFollowUp?: () => string[];
+  drainSteering?: () => PromptInput[];
+  drainFollowUp?: () => PromptInput[];
 };
 
 export type AgentState = {
