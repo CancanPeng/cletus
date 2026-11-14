@@ -1776,7 +1776,7 @@ export class TuiApp {
         }),
       );
     }
-    body.add(text("type to filter · space cycle · enter/esc close", this.color("muted")));
+    body.add(text("type to filter · space cycle · esc clear/close", this.color("muted")));
   }
 
   private getClipboard(): ClipboardService | undefined {
