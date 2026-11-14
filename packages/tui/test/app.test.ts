@@ -1,8 +1,54 @@
 import { describe, expect, it } from "vitest";
 import { createTestRenderer } from "@opentui/core/testing";
+import type { ClipboardService } from "@opentui/core";
+import type { ImageAttachment } from "@cletus/ai";
 import { TuiApp, type SlashCommand } from "../src/app.js";
 import { KeybindingsManager } from "../src/keybindings.js";
 import { getTheme } from "../src/theme.js";
+
+function fakeClipboard(mimeType: string, bytes: Uint8Array): ClipboardService {
+  return {
+    read: async () => ({ status: "read", representation: { mimeType, bytes } }),
+    writeText: async () => ({
+      host: { status: "not-attempted" },
+      terminal: { status: "not-attempted" },
+    }),
+    clear: async () => ({
+      host: { status: "not-attempted" },
+      terminal: { status: "not-attempted" },
+    }),
+    dispose: async () => undefined,
+  } as unknown as ClipboardService;
+}
+
+async function setupImageApp(opts: {
+  mimeType: string;
+  bytes: Uint8Array;
+  attach?: (bytes: Uint8Array, mediaType: "image/png" | "image/jpeg") => Promise<ImageAttachment | undefined>;
+}) {
+  const test = await createTestRenderer({ width: 100, height: 30, exitOnCtrlC: false });
+  const submissions: Array<{ text: string; images?: ImageAttachment[] }> = [];
+  const attachCalls: Array<{ size: number; mediaType: string }> = [];
+  const app = new TuiApp({
+    header: "cletus test",
+    theme: getTheme("dark", { preset: "unicode" }),
+    keybindings: new KeybindingsManager({}),
+    submit: async (text, images) => {
+      submissions.push({ text, ...(images ? { images } : {}) });
+    },
+    abort: () => undefined,
+    commands: [],
+    history: [],
+    renderer: test.renderer,
+    clipboard: fakeClipboard(opts.mimeType, opts.bytes),
+    attachImage: async (bytes, mediaType) => {
+      attachCalls.push({ size: bytes.length, mediaType });
+      return opts.attach ? opts.attach(bytes, mediaType) : { mediaType, path: "/tmp/shot.png" };
+    },
+  });
+  await app.start();
+  return { ...test, app, submissions, attachCalls };
+}
 
 async function setupApp(overrides: Record<string, string | string[]> = {}) {
   const test = await createTestRenderer({ width: 100, height: 30, exitOnCtrlC: false });
@@ -450,6 +496,73 @@ describe("TuiApp", () => {
     ctx.mockInput.pressKey("down");
     await ctx.flush();
     expect(ctx.captureCharFrame()).toContain("draft");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
+  it("attaches pasted image, inserts placeholder, and sends images with submit", async () => {
+    const att: ImageAttachment = { mediaType: "image/png", path: "/tmp/a.png" };
+    const ctx = await setupImageApp({
+      mimeType: "image/png",
+      bytes: new Uint8Array([0x89, 0x50]),
+      attach: async () => att,
+    });
+    ctx.mockInput.pressKey("v", { ctrl: true });
+    await ctx.flush();
+    expect(ctx.attachCalls).toHaveLength(1);
+    expect(ctx.captureCharFrame()).toContain("[图片 #1]");
+    ctx.mockInput.typeText(" analyze");
+    ctx.mockInput.pressEnter();
+    await ctx.flush();
+    expect(ctx.submissions).toEqual([{ text: "[图片 #1] analyze", images: [att] }]);
+    ctx.mockInput.typeText("next");
+    ctx.mockInput.pressEnter();
+    await ctx.flush();
+    expect(ctx.submissions[1]).toEqual({ text: "next" });
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
+  it("rejects oversize images with a warning and no placeholder", async () => {
+    const ctx = await setupImageApp({
+      mimeType: "image/png",
+      bytes: new Uint8Array(5 * 1024 * 1024 + 1),
+    });
+    ctx.mockInput.pressKey("v", { ctrl: true });
+    await ctx.flush();
+    expect(ctx.attachCalls).toHaveLength(0);
+    expect(ctx.captureCharFrame()).toContain("5MB");
+    expect(ctx.captureCharFrame()).not.toContain("[图片 #1]");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
+  it("clears pending images when input is cancelled", async () => {
+    const ctx = await setupImageApp({ mimeType: "image/png", bytes: new Uint8Array([1]) });
+    ctx.mockInput.pressKey("v", { ctrl: true });
+    await ctx.flush();
+    expect(ctx.attachCalls).toHaveLength(1);
+    ctx.mockInput.pressEscape();
+    // The stdin parser holds a lone ESC for ~20ms to disambiguate sequences.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await ctx.flush();
+    ctx.mockInput.typeText("x");
+    ctx.mockInput.pressEnter();
+    await ctx.flush();
+    expect(ctx.submissions).toEqual([{ text: "x" }]);
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
+  it("keeps plain-text paste behavior", async () => {
+    const ctx = await setupImageApp({
+      mimeType: "text/plain",
+      bytes: new TextEncoder().encode("pasted text"),
+    });
+    ctx.mockInput.pressKey("v", { ctrl: true });
+    await ctx.flush();
+    expect(ctx.attachCalls).toHaveLength(0);
+    expect(ctx.captureCharFrame()).toContain("pasted text");
     ctx.app.stop();
     await ctx.dispose();
   });

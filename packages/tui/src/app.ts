@@ -18,6 +18,7 @@ import {
   type CliRenderer,
   type KeyEvent,
 } from "@opentui/core";
+import type { ImageAttachment } from "@cletus/ai";
 import type { KeybindingsManager } from "./keybindings.js";
 import type { SymbolKey, Theme, ThemeToken } from "./theme.js";
 
@@ -45,14 +46,20 @@ export type TuiAppOptions = {
   theme: Theme;
   keybindings: KeybindingsManager;
   showThinking?: boolean;
-  submit: (text: string) => Promise<void>;
-  followUp?: (text: string) => void;
+  submit: (text: string, images?: ImageAttachment[]) => Promise<void>;
+  followUp?: (text: string, images?: ImageAttachment[]) => void;
+  attachImage?: (
+    bytes: Uint8Array,
+    mediaType: "image/png" | "image/jpeg",
+  ) => Promise<ImageAttachment | undefined>;
   abort: () => void;
   commands: SlashCommand[];
   history: string[];
   onExit?: () => void;
   /** Test seam: use a pre-created renderer instead of taking over the terminal. */
   renderer?: CliRenderer;
+  /** Test seam: inject a clipboard instead of the host/terminal clipboard. */
+  clipboard?: ClipboardService;
 };
 
 export type TranscriptBlock =
@@ -191,6 +198,7 @@ export class TuiApp {
   private toolSpinner = 0;
   private toolTicker: NodeJS.Timeout | undefined;
   private clipboard: ClipboardService | undefined;
+  private readonly pendingImages: ImageAttachment[] = [];
   private readonly blocks = new Map<string, TranscriptBlock>();
   private readonly order: string[] = [];
   private readonly views = new Map<string, BlockView>();
@@ -971,7 +979,10 @@ export class TuiApp {
     if (bindings.matches(key, "cancel")) {
       this.intercept(key);
       if (this.status.busy) this.options.abort();
-      else this.textarea?.setText("");
+      else {
+        this.textarea?.setText("");
+        this.pendingImages.length = 0;
+      }
       return;
     }
     if (bindings.matches(key, "scrollUp")) {
@@ -1079,7 +1090,8 @@ export class TuiApp {
     const text = this.textarea?.plainText.trim() ?? "";
     if (!text) return;
     if (this.status.busy && this.options.followUp) {
-      this.options.followUp(text);
+      const images = this.pendingImages.splice(0);
+      this.options.followUp(text, ...(images.length ? [images] : []));
       this.textarea?.setText("");
       return;
     }
@@ -1103,7 +1115,8 @@ export class TuiApp {
       kind: "user",
       text,
     });
-    void this.options.submit(text).catch((error: unknown) => {
+    const images = this.pendingImages.splice(0);
+    void this.options.submit(text, ...(images.length ? [images] : [])).catch((error: unknown) => {
       this.notify(error instanceof Error ? error.message : String(error), "error");
     });
   }
@@ -1410,6 +1423,7 @@ export class TuiApp {
 
   private getClipboard(): ClipboardService | undefined {
     if (!this.renderer || this.stopped) return undefined;
+    if (this.options.clipboard) return this.options.clipboard;
     if (!this.clipboard) {
       this.clipboard = createClipboard({
         host: createHostClipboard(),
@@ -1454,7 +1468,9 @@ export class TuiApp {
     const clipboard = this.getClipboard();
     if (!clipboard) return;
     try {
-      const result = await clipboard.read({ preferredTypes: ["text/plain"] });
+      const result = await clipboard.read({
+        preferredTypes: ["image/png", "image/jpeg", "text/plain"],
+      });
       if (result.status !== "read") {
         this.notify(
           result.status === "empty" ? "Clipboard is empty" : `Clipboard read: ${result.status}`,
@@ -1462,16 +1478,39 @@ export class TuiApp {
         );
         return;
       }
-      const text = stripAnsiSequences(decodePasteBytes(result.representation.bytes));
-      if (
-        text &&
+      const canInsert =
         !this.stopped &&
         !this.modal &&
         !this.manager &&
         !this.inputModal &&
         !this.selectState &&
-        textarea.focused
-      ) {
+        textarea.focused;
+      const { mimeType, bytes } = result.representation;
+      if (mimeType === "image/png" || mimeType === "image/jpeg") {
+        if (!canInsert) return;
+        if (!this.options.attachImage) {
+          this.notify("Image paste not available", "warn");
+          return;
+        }
+        if (bytes.length > 5 * 1024 * 1024) {
+          this.notify("Image exceeds 5MB limit", "warn");
+          return;
+        }
+        if (this.pendingImages.length >= 10) {
+          this.notify("At most 10 images per message", "warn");
+          return;
+        }
+        const attachment = await this.options.attachImage(bytes, mimeType);
+        if (!attachment) {
+          this.notify("Could not save pasted image", "warn");
+          return;
+        }
+        this.pendingImages.push(attachment);
+        textarea.insertText(`[图片 #${this.pendingImages.length}]`);
+        return;
+      }
+      const text = stripAnsiSequences(decodePasteBytes(bytes));
+      if (text && canInsert) {
         textarea.insertText(text);
       }
     } catch (error) {

@@ -65,6 +65,9 @@ importers:
 
   packages/tui:
     dependencies:
+      '@cletus/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@opentui/core':
         specifier: ^0.8.2
         version: 0.8.2(typescript@5.9.3)(web-tree-sitter@0.25.10)
