@@ -1,9 +1,50 @@
 import { open, stat } from "node:fs/promises";
+import { basename } from "node:path";
 import type { AgentTool, ToolResult } from "@cletus/agent";
 import type { PermissionPolicy } from "../permissions/policy.js";
 import { truncateHead } from "./truncate.js";
 
 const MAX_BYTES = 1024 * 1024;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** Detects images by content, never by extension. */
+function sniffImage(head: Buffer): "image/png" | "image/jpeg" | undefined {
+  if (head.length >= 8 && head.subarray(0, 8).equals(PNG_SIGNATURE)) return "image/png";
+  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) {
+    return "image/jpeg";
+  }
+  return undefined;
+}
+
+function pngSize(data: Buffer): { width: number; height: number } | undefined {
+  if (data.length < 24 || data.toString("ascii", 12, 16) !== "IHDR") return undefined;
+  const width = data.readUInt32BE(16);
+  const height = data.readUInt32BE(20);
+  return width > 0 && height > 0 ? { width, height } : undefined;
+}
+
+/** Walks JPEG segments to the first SOF marker; undefined for truncated files. */
+function jpegSize(data: Buffer): { width: number; height: number } | undefined {
+  const SOF = new Set([
+    0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
+  ]);
+  let offset = 2;
+  while (offset + 9 < data.length) {
+    if (data[offset] !== 0xff) return undefined;
+    const marker = data[offset + 1] ?? 0;
+    if (SOF.has(marker)) {
+      const height = data.readUInt16BE(offset + 5);
+      const width = data.readUInt16BE(offset + 7);
+      return width > 0 && height > 0 ? { width, height } : undefined;
+    }
+    const length = data.readUInt16BE(offset + 2);
+    if (length < 2) return undefined;
+    offset += 2 + length;
+  }
+  return undefined;
+}
 
 export function createReadTool(deps: {
   policy: PermissionPolicy;
@@ -12,7 +53,8 @@ export function createReadTool(deps: {
   return {
     name: "read",
     snippet: "Read file contents",
-    description: "Read a text file with line numbers.",
+    description:
+      "Read a text file with line numbers, or a png/jpeg image as an image block.",
     parameters: {
       type: "object",
       properties: {
@@ -41,6 +83,39 @@ export function createReadTool(deps: {
         const buffer = Buffer.alloc(size);
         const { bytesRead } = await handle.read(buffer, 0, size, 0);
         const data = buffer.subarray(0, bytesRead);
+
+        const mediaType = sniffImage(data);
+        if (mediaType) {
+          if (info.size > MAX_IMAGE_BYTES) {
+            // Truncating the bytes would hand the model a corrupt image it
+            // would then reason about; refuse instead.
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: `Image exceeds 5MB limit: ${path} is ${Math.round(
+                    info.size / 1024 / 1024,
+                  )}MB; resize or crop it before reading.`,
+                },
+              ],
+            };
+          }
+          const dimensions = mediaType === "image/png" ? pngSize(data) : jpegSize(data);
+          const details: string[] = [mediaType];
+          if (dimensions) details.push(`${dimensions.width}×${dimensions.height}`);
+          details.push(`${Math.max(1, Math.round(info.size / 1024))} KB`);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `${basename(path)} — ${details.join(", ")}, path: ${path}`,
+              },
+              { type: "image", mediaType, path },
+            ],
+          };
+        }
+
         if (data.includes(0)) {
           return {
             isError: true,
