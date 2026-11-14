@@ -5,10 +5,24 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const PNG = Buffer.from([
-  0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a, 0,0,0,13, 0x49,0x48,0x44,0x52,
-  0,0,0x05,0, 0,0,0,0x03,0, 8,2,0,0,0,
-]);
+// Structurally complete 1x1 PNG: signature + IHDR + IDAT + IEND. `read`
+// validates structure, so a bare signature would be rejected as binary.
+const PNG = (() => {
+  const signature = Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]);
+  const ihdr = Buffer.alloc(25);
+  ihdr.writeUInt32BE(13, 0);
+  ihdr.write("IHDR", 4, "ascii");
+  ihdr.writeUInt32BE(1, 8);
+  ihdr.writeUInt32BE(1, 12);
+  ihdr[16] = 8;
+  ihdr[17] = 2;
+  const idat = Buffer.alloc(21);
+  idat.writeUInt32BE(9, 0);
+  idat.write("IDAT", 4, "ascii");
+  const iend = Buffer.alloc(12);
+  iend.write("IEND", 4, "ascii");
+  return Buffer.concat([signature, ihdr, idat, iend]);
+})();
 
 const temp = await mkdtemp(join(tmpdir(), "e2e-img-"));
 const home = join(temp, "home");

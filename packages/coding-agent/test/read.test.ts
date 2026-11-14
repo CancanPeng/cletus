@@ -25,14 +25,44 @@ function context(cwd: string) {
   };
 }
 
-/** 8-byte PNG signature + IHDR chunk declaring the given dimensions. */
+/**
+ * A structurally complete 1x1 PNG plus an IHDR chunk. CRC fields are zero,
+ * which is fine: `read` validates structure, not checksums.
+ */
 function png(width: number, height: number): Buffer {
-  const buffer = Buffer.alloc(33);
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buffer, 0);
-  buffer.writeUInt32BE(13, 8);
-  buffer.write("IHDR", 12, "ascii");
-  buffer.writeUInt32BE(width, 16);
-  buffer.writeUInt32BE(height, 20);
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const ihdr = Buffer.alloc(25);
+  ihdr.writeUInt32BE(13, 0);
+  ihdr.write("IHDR", 4, "ascii");
+  ihdr.writeUInt32BE(width, 8);
+  ihdr.writeUInt32BE(height, 12);
+  ihdr[16] = 8;
+  ihdr[17] = 2;
+  const idat = Buffer.alloc(21);
+  idat.writeUInt32BE(9, 0);
+  idat.write("IDAT", 4, "ascii");
+  const iend = Buffer.alloc(12);
+  iend.write("IEND", 4, "ascii");
+  return Buffer.concat([signature, ihdr, idat, iend]);
+}
+
+/**
+ * Minimal JPEG: SOI, one APP0 segment, then an SOF0 declaring the dimensions.
+ * Segment length counts itself, so the segment occupies 2 (marker) + length bytes.
+ */
+function jpeg(width: number, height: number): Buffer {
+  const buffer = Buffer.alloc(2 + 2 + 2 + 2 + 17);
+  buffer[0] = 0xff;
+  buffer[1] = 0xd8; // SOI
+  buffer[2] = 0xff;
+  buffer[3] = 0xe0; // APP0 marker
+  buffer.writeUInt16BE(2, 4); // length 2 => next marker starts at 2 + 2 + 2 = 6
+  buffer[6] = 0xff;
+  buffer[7] = 0xc0; // SOF0
+  buffer.writeUInt16BE(11, 8);
+  buffer[10] = 8; // precision
+  buffer.writeUInt16BE(height, 11);
+  buffer.writeUInt16BE(width, 13);
   return buffer;
 }
 
@@ -71,7 +101,7 @@ describe("read tool images", () => {
 
   it("detects JPEG by magic bytes", async () => {
     const cwd = await temp();
-    await writeFile(join(cwd, "photo.bin"), Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]));
+    await writeFile(join(cwd, "photo.bin"), jpeg(640, 480));
     const result = await createReadTool({ policy: policyFor(cwd), cwd }).execute(
       { path: "photo.bin" },
       context(cwd),
@@ -106,8 +136,10 @@ describe("read tool images", () => {
     expect((result.content[0] as { text: string }).text).toContain("5MB");
   });
 
-  it("treats a truncated PNG header as an image rather than failing", async () => {
+  it("falls back to a binary error when a PNG has only a signature", async () => {
     const cwd = await temp();
+    // Magic matches but there is no IHDR/IDAT/IEND. Forwarding this as an
+    // image hands the provider bytes it cannot decode, so it must not.
     await writeFile(
       join(cwd, "cut.png"),
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -116,7 +148,31 @@ describe("read tool images", () => {
       { path: "cut.png" },
       context(cwd),
     );
-    expect(result.isError).toBeFalsy();
+    expect(result.isError).toBe(true);
+    expect(result.content).toHaveLength(1);
+    expect((result.content[0] as { text: string }).text).toContain("Cannot read binary file");
+  });
+
+  it("falls back to a binary error when a JPEG has no frame header", async () => {
+    const cwd = await temp();
+    await writeFile(join(cwd, "cut.jpg"), Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]));
+    const result = await createReadTool({ policy: policyFor(cwd), cwd }).execute(
+      { path: "cut.jpg" },
+      context(cwd),
+    );
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain("Cannot read binary file");
+  });
+
+  it("still returns an image when only the dimensions are unreadable but the file is a real PNG", async () => {
+    const cwd = await temp();
+    // Signature + IHDR chunk header but a zero width: dimensions unknown,
+    // yet the payload is a genuine (if odd) PNG container.
+    await writeFile(join(cwd, "odd.png"), png(0, 0));
+    const result = await createReadTool({ policy: policyFor(cwd), cwd }).execute(
+      { path: "odd.png" },
+      context(cwd),
+    );
     expect(result.content[1]).toMatchObject({ type: "image", mediaType: "image/png" });
   });
 });

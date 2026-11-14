@@ -18,21 +18,32 @@ function sniffImage(head: Buffer): "image/png" | "image/jpeg" | undefined {
   return undefined;
 }
 
-function pngSize(data: Buffer): { width: number; height: number } | undefined {
-  if (data.length < 24 || data.toString("ascii", 12, 16) !== "IHDR") return undefined;
+/**
+ * A PNG must start with the 8-byte signature followed by an IHDR chunk; without
+ * it there is nothing to decode. Returns dimensions when they are readable.
+ */
+function pngInfo(
+  data: Buffer,
+): { width: number; height: number } | "invalid" | undefined {
+  if (data.length < 33 || data.toString("ascii", 12, 16) !== "IHDR") return "invalid";
   const width = data.readUInt32BE(16);
   const height = data.readUInt32BE(20);
   return width > 0 && height > 0 ? { width, height } : undefined;
 }
 
-/** Walks JPEG segments to the first SOF marker; undefined for truncated files. */
-function jpegSize(data: Buffer): { width: number; height: number } | undefined {
+/**
+ * Walks JPEG segments to the first SOF marker. No SOF means the payload cannot
+ * be decoded, so the caller must not treat it as an image.
+ */
+function jpegInfo(
+  data: Buffer,
+): { width: number; height: number } | "invalid" | undefined {
   const SOF = new Set([
     0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
   ]);
   let offset = 2;
   while (offset + 9 < data.length) {
-    if (data[offset] !== 0xff) return undefined;
+    if (data[offset] !== 0xff) return "invalid";
     const marker = data[offset + 1] ?? 0;
     if (SOF.has(marker)) {
       const height = data.readUInt16BE(offset + 5);
@@ -40,10 +51,10 @@ function jpegSize(data: Buffer): { width: number; height: number } | undefined {
       return width > 0 && height > 0 ? { width, height } : undefined;
     }
     const length = data.readUInt16BE(offset + 2);
-    if (length < 2) return undefined;
+    if (length < 2) return "invalid";
     offset += 2 + length;
   }
-  return undefined;
+  return "invalid";
 }
 
 export function createReadTool(deps: {
@@ -84,7 +95,21 @@ export function createReadTool(deps: {
         const { bytesRead } = await handle.read(buffer, 0, size, 0);
         const data = buffer.subarray(0, bytesRead);
 
-        const mediaType = sniffImage(data);
+        const candidate = sniffImage(data);
+        const imageInfo = candidate
+          ? candidate === "image/png"
+            ? pngInfo(data)
+            : jpegInfo(data)
+          : "invalid";
+        // A candidate whose structure does not parse is not an image: handing
+        // the bytes over as one gives the provider something it cannot decode.
+        if (candidate && imageInfo === "invalid") {
+          return {
+            isError: true,
+            content: [{ type: "text", text: `Cannot read binary file: ${path}` }],
+          };
+        }
+        const mediaType = candidate;
         if (mediaType) {
           if (info.size > MAX_IMAGE_BYTES) {
             // Truncating the bytes would hand the model a corrupt image it
@@ -101,7 +126,7 @@ export function createReadTool(deps: {
               ],
             };
           }
-          const dimensions = mediaType === "image/png" ? pngSize(data) : jpegSize(data);
+          const dimensions = imageInfo === "invalid" ? undefined : imageInfo;
           const details: string[] = [mediaType];
           if (dimensions) details.push(`${dimensions.width}×${dimensions.height}`);
           details.push(`${Math.max(1, Math.round(info.size / 1024))} KB`);
