@@ -234,10 +234,28 @@ export class AgentSession {
     if (this.model.supportsImages !== false) return messages;
     let stripped = false;
     const projected = messages.map((message) => {
-      if (message.role !== "user" || !message.images?.length) return message;
-      stripped = true;
-      const { images: _images, ...rest } = message;
-      return { ...rest, content: `${rest.content}\n[图片已忽略：当前模型不支持图片]` };
+      if (message.role === "user" && message.images?.length) {
+        stripped = true;
+        const { images: _images, ...rest } = message;
+        return { ...rest, content: `${rest.content}\n[图片已忽略：当前模型不支持图片]` };
+      }
+      if (
+        message.role === "toolResult" &&
+        message.content.some((block) => block.type === "image")
+      ) {
+        stripped = true;
+        // Keep the text summary: the path and dimensions are still useful for
+        // a model that can shell out to an OCR tool instead.
+        return {
+          ...message,
+          content: message.content.map((block) =>
+            block.type === "text"
+              ? block
+              : { type: "text" as const, text: "[图片已忽略：当前模型不支持图片]" },
+          ),
+        };
+      }
+      return message;
     });
     if (stripped) {
       this.options.onNotice?.("当前模型不支持图片，图片已忽略", "warn");

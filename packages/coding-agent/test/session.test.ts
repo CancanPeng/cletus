@@ -230,4 +230,65 @@ describe("image attachments", () => {
     }
     await session.dispose();
   });
+
+  it("strips tool result images for non-vision models but keeps the summary text", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    const manager = await SessionManager.create(cwd, { home });
+    const model: Model = {
+      provider: "openai",
+      id: "no-vision",
+      baseUrl: "http://localhost",
+      contextWindow: 100000,
+      maxOutputTokens: 1000,
+      supportsImages: false,
+    };
+    let seen: LlmContext | undefined;
+    const notices: string[] = [];
+    const streamFn: StreamFn = (_model, context) => {
+      seen = context;
+      const stream = new AssistantEventStream();
+      stream.end(assistantMessage(model, [{ type: "text", text: "ok" }], "stop"));
+      return stream;
+    };
+    // Append before create: the session replays the branch into the agent, so
+    // messages added afterwards would never reach prepareRequest.
+    await manager.appendMessage({
+      role: "toolResult",
+      toolCallId: "call_1",
+      toolName: "read",
+      content: [
+        { type: "text", text: "shot.png — image/png, 10×10" },
+        { type: "image", mediaType: "image/png", path: join(cwd, "shot.png") },
+      ],
+      isError: false,
+      timestamp: 1,
+    });
+    const session = await AgentSession.create({
+      cwd,
+      home,
+      config: createDefaultConfig(),
+      auth: { keys: {} },
+      model,
+      sessionManager: manager,
+      permissions: new PermissionPolicy({
+        cwd,
+        readOnlyRoots: [],
+        allowWrite: [],
+        yolo: true,
+        interactive: false,
+      }),
+      resources: new ResourceLoader(cwd, home),
+      streamFn,
+      onNotice: (text) => notices.push(text),
+    });
+    await session.prompt("next");
+    expect(notices.some((text) => text.includes("不支持图片"))).toBe(true);
+    const toolMessage = seen?.messages.find((message) => message.role === "toolResult");
+    expect(toolMessage?.content).toEqual([
+      { type: "text", text: "shot.png — image/png, 10×10" },
+      { type: "text", text: "[图片已忽略：当前模型不支持图片]" },
+    ]);
+    await session.dispose();
+  });
 });
