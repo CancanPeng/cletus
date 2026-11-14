@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { AssistantEventStream } from "./event-stream.js";
 import { parseSse } from "./sse.js";
 import { parseRetryAfter, sleep } from "./retry.js";
@@ -30,7 +31,7 @@ function finite(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function toAnthropicMessages(messages: Message[]): Array<Record<string, unknown>> {
+async function toAnthropicMessages(messages: Message[]): Promise<Array<Record<string, unknown>>> {
   const result: Array<Record<string, unknown>> = [];
   const append = (role: "user" | "assistant", block: Record<string, unknown>): void => {
     const last = result[result.length - 1];
@@ -43,6 +44,19 @@ function toAnthropicMessages(messages: Message[]): Array<Record<string, unknown>
 
   for (const message of messages) {
     if (message.role === "user" || message.role === "system") {
+      if (message.role === "user" && message.images?.length) {
+        for (const image of message.images) {
+          try {
+            const data = (await readFile(image.path)).toString("base64");
+            append("user", {
+              type: "image",
+              source: { type: "base64", media_type: image.mediaType, data },
+            });
+          } catch {
+            append("user", { type: "text", text: `[图片不可用: ${image.path}]` });
+          }
+        }
+      }
       append("user", { type: "text", text: message.content });
     } else if (message.role === "assistant") {
       for (const block of message.content) {
@@ -103,7 +117,7 @@ export function streamAnthropic(
     model: model.id,
     max_tokens: maxTokens,
     system: context.systemPrompt,
-    messages: toAnthropicMessages(context.messages),
+    messages: [],
     tools: context.tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
@@ -128,6 +142,7 @@ export function streamAnthropic(
     let sawMessageStop = false;
 
     try {
+      body["messages"] = await toAnthropicMessages(context.messages);
       let response: Response | undefined;
       let lastError = "";
       for (let attempt = 0; attempt <= 2; attempt += 1) {

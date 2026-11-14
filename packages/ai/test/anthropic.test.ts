@@ -1,4 +1,7 @@
 import { createServer, type Server } from "node:http";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AssistantStreamEvent, Model } from "../src/types.js";
 import { streamAnthropic } from "../src/anthropic.js";
@@ -146,5 +149,85 @@ describe("streamAnthropic", () => {
     if (error?.type === "error") {
       expect(error.error).toContain("message_stop");
     }
+  });
+
+  it("serializes user images as base64 image blocks before text", async () => {
+    process.env["FAKE_ANTHROPIC_KEY"] = "test";
+    const dir = await mkdtemp(join(tmpdir(), "cletus-img-"));
+    const imgPath = join(dir, "shot.png");
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    await writeFile(imgPath, bytes);
+    let body: { messages: Array<{ content: unknown }> } | undefined;
+    const port = await listen((req, res) => {
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        body = JSON.parse(raw) as { messages: Array<{ content: unknown }> };
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.end('data: {"type":"message_stop"}\n\n');
+      });
+    });
+    const events = await collect(
+      streamAnthropic(
+        { ...model, baseUrl: `http://127.0.0.1:${port}` },
+        {
+          systemPrompt: "s",
+          tools: [],
+          messages: [
+            {
+              role: "user",
+              content: "analyze",
+              timestamp: 1,
+              images: [{ mediaType: "image/png", path: imgPath }],
+            },
+          ],
+        },
+        { apiKey: "test" },
+      ),
+    );
+    expect(events.some((event) => event.type === "done")).toBe(true);
+    const content = body?.messages[0]?.content as unknown[];
+    expect(content[0]).toEqual({
+      type: "image",
+      source: { type: "base64", media_type: "image/png", data: bytes.toString("base64") },
+    });
+    expect(content[1]).toEqual({ type: "text", text: "analyze" });
+  });
+
+  it("degrades missing image files to a text placeholder", async () => {
+    process.env["FAKE_ANTHROPIC_KEY"] = "test";
+    const missing = join(tmpdir(), "cletus-img-missing", "gone.png");
+    let body: { messages: Array<{ content: unknown }> } | undefined;
+    const port = await listen((req, res) => {
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        body = JSON.parse(raw) as { messages: Array<{ content: unknown }> };
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.end('data: {"type":"message_stop"}\n\n');
+      });
+    });
+    const events = await collect(
+      streamAnthropic(
+        { ...model, baseUrl: `http://127.0.0.1:${port}` },
+        {
+          systemPrompt: "s",
+          tools: [],
+          messages: [
+            {
+              role: "user",
+              content: "analyze",
+              timestamp: 1,
+              images: [{ mediaType: "image/png", path: missing }],
+            },
+          ],
+        },
+        { apiKey: "test" },
+      ),
+    );
+    expect(events.some((event) => event.type === "done")).toBe(true);
+    const content = body?.messages[0]?.content as unknown[];
+    expect(content).toContainEqual({ type: "text", text: `[图片不可用: ${missing}]` });
+    expect(content).toContainEqual({ type: "text", text: "analyze" });
   });
 });
