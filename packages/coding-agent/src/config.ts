@@ -260,5 +260,6 @@ export function resolveModel(
   if (source.apiKeyId !== undefined) model.apiKeyId = source.apiKeyId;
   if (source.supportsThinking !== undefined) model.supportsThinking = source.supportsThinking;
   if (source.thinkingLevel !== undefined) model.thinkingLevel = source.thinkingLevel;
+  if (source.supportsImages !== undefined) model.supportsImages = source.supportsImages;
   return model;
 }

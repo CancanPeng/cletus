@@ -73,7 +73,7 @@ Bash stdout/stderr streams into the tool card while the command runs (up to ever
 | Mouse wheel | scroll transcript; auto-follow pauses when scrolled up |
 | Mouse selection | releasing the left button copies the selected text |
 | Cmd+C / Ctrl+Shift+C | copy selected text, or the whole input if nothing is selected |
-| Cmd+V / Ctrl+Shift+V / Ctrl+V | paste from the host clipboard |
+| Cmd+V / Ctrl+Shift+V / Ctrl+V | paste text or an image (png/jpeg, ≤5MB) from the host clipboard |
 | Tab | complete slash command |
 | Up/Down | history (empty input) |
 
@@ -84,6 +84,12 @@ Override bindings in `~/.cletus/config.json` under `tui.keybindings`, for exampl
 ```
 
 Keybinding changes apply on the next launch. `/theme` switches and persists immediately.
+
+## Images
+
+Paste a screenshot with the paste key: it is saved next to the session file and a `[图片 #N]` placeholder appears in the input. Send it with your question; up to 10 images per message, 5MB each. Images are stored as file references in the session log, so `/resume` keeps them.
+
+Known limits: images are re-sent with the full history on every turn, so many large screenshots across many turns can hit the provider's request size limit (~32MB on Anthropic); use `/compact` or `/new` when that happens. Models marked `"supportsImages": false` in `~/.cletus/config.json` get a text placeholder instead of the image.
 
 ## Status bar
 

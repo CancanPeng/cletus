@@ -54,4 +54,19 @@ describe("resolveModel", () => {
   it("still rejects an unknown reference", () => {
     expect(() => resolveModel(config(), { keys: {} }, "nope/nope")).toThrow(/Unknown model/);
   });
+
+  it("passes supportsImages through resolveModel", () => {
+    const cfg = config();
+    cfg.models.push({
+      provider: "openai",
+      id: "no-vision",
+      contextWindow: 100000,
+      maxOutputTokens: 1000,
+      supportsImages: false,
+    });
+    expect(resolveModel(cfg, { keys: {} }, "openai/no-vision").supportsImages).toBe(false);
+    expect(
+      resolveModel(cfg, { keys: {} }, "aliyun-token-plan/deepseek-v4.1-flash-1017").supportsImages,
+    ).toBeUndefined();
+  });
 });

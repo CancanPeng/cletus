@@ -990,11 +990,11 @@ async function runTui(opts: {
     theme: currentTheme,
     keybindings,
     showThinking: opts.config.tui.showThinking,
-    submit: async (text) => {
+    submit: async (text, images) => {
       if (!session) return;
       await refreshHeader();
       if (session.agent.state.isStreaming) {
-        session.steer(text);
+        session.steer(text, images);
         return;
       }
       conversationStart = Date.now();
@@ -1009,7 +1009,7 @@ async function runTui(opts: {
         startedAt: conversationStart,
       });
       try {
-        await session.prompt(text);
+        await session.prompt(text, images);
       } finally {
         app?.setStatus({
           busy: false,
@@ -1021,7 +1021,11 @@ async function runTui(opts: {
         });
       }
     },
-    followUp: (text) => session?.followUp(text),
+    followUp: (text, images) => session?.followUp(text, images),
+    attachImage: async (bytes, mediaType) => {
+      if (!session) return undefined;
+      return session.manager.saveAttachment(bytes, mediaType === "image/png" ? "png" : "jpg");
+    },
     abort: () => session?.abort(),
     commands,
     history: [],

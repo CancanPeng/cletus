@@ -190,6 +190,7 @@ describe("image attachments", () => {
       supportsImages: false,
     };
     let seen: LlmContext | undefined;
+    const notices: string[] = [];
     const streamFn: StreamFn = (_model, context) => {
       seen = context;
       const stream = new AssistantEventStream();
@@ -212,8 +213,10 @@ describe("image attachments", () => {
       }),
       resources: new ResourceLoader(cwd, home),
       streamFn,
+      onNotice: (text) => notices.push(text),
     });
     await session.prompt("look", [att]);
+    expect(notices.some((text) => text.includes("不支持图片"))).toBe(true);
     const userMessage = seen?.messages.find((message) => message.role === "user");
     expect(userMessage?.role).toBe("user");
     if (userMessage?.role === "user") {

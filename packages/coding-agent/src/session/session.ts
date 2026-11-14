@@ -232,11 +232,17 @@ export class AgentSession {
    */
   private projectForModel(messages: AgentMessage[]): AgentMessage[] {
     if (this.model.supportsImages !== false) return messages;
-    return messages.map((message) => {
+    let stripped = false;
+    const projected = messages.map((message) => {
       if (message.role !== "user" || !message.images?.length) return message;
+      stripped = true;
       const { images: _images, ...rest } = message;
       return { ...rest, content: `${rest.content}\n[图片已忽略：当前模型不支持图片]` };
     });
+    if (stripped) {
+      this.options.onNotice?.("当前模型不支持图片，图片已忽略", "warn");
+    }
+    return projected;
   }
 
   private async prepareRequest(ctx: {
