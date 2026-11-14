@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import {
   estimateMessageTokens,
   type AssistantContent,
@@ -93,7 +94,12 @@ export function selectCut(branch: SessionEntry[], keepRecentTokens: number): num
 function serializeMessage(entry: SessionEntry): string {
   if (entry.type !== "message") return "";
   const message = entry.message;
-  if (message.role === "user") return `## User\n${message.content}\n`;
+  if (message.role === "user") {
+    const images = message.images
+      ?.map((image) => `[attached image: ${basename(image.path)}]`)
+      .join("\n");
+    return `## User\n${message.content}${images ? `\n${images}` : ""}\n`;
+  }
   if (message.role === "assistant") {
     const text = message.content
       .map((block: AssistantContent) =>

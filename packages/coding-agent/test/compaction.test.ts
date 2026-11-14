@@ -131,4 +131,46 @@ describe("compaction", () => {
     }
     for (const id of callIds) expect(resultIds.has(id)).toBe(true);
   });
+
+  it("lists attached images by basename in the summary input", async () => {
+    const manager = SessionManager.inMemory(process.cwd());
+    await manager.appendMessage({
+      role: "user",
+      content: `analyze ${"x".repeat(200)}`,
+      timestamp: 0,
+      images: [{ mediaType: "image/png", path: "/x/shot.png" }],
+    });
+    for (let index = 1; index < 8; index += 1) {
+      await manager.appendMessage({
+        role: index % 2 === 1 ? "assistant" : "user",
+        ...(index % 2 === 1
+          ? {
+              content: [{ type: "text" as const, text: `reply ${index}` }],
+              provider: "openai",
+              model: "fake",
+              usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 },
+              stopReason: "stop" as const,
+            }
+          : { content: `user ${index} ${"y".repeat(100)}` }),
+        timestamp: index,
+      } as AgentMessage);
+    }
+    let summaryInput = "";
+    const streamFn: StreamFn = (_model, context): AssistantEventStream => {
+      summaryInput = context.messages.map((message) =>
+        message.role === "user" ? message.content : "",
+      ).join("\n");
+      const stream = new AssistantEventStream();
+      const message = assistantMessage(model, [{ type: "text", text: "## Goal\nok" }], "stop");
+      stream.end(message);
+      return stream;
+    };
+    const result = await compact(manager, model, streamFn, {
+      keepRecentTokens: 20,
+      force: true,
+    });
+    expect("skipped" in result).toBe(false);
+    expect(summaryInput).toContain("[attached image: shot.png]");
+    expect(summaryInput).not.toContain("/x/shot.png");
+  });
 });
