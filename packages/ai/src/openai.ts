@@ -1,18 +1,20 @@
 import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
 import { AssistantEventStream } from "./event-stream.js";
 import { parseSse } from "./sse.js";
 import { parseRetryAfter, sleep } from "./retry.js";
-import { toolContentText } from "./tokens.js";
 import {
   assistantMessage,
   emptyUsage,
   type AssistantContent,
   type AssistantMessage,
+  type ImageContent,
   type LlmContext,
   type Message,
   type Model,
   type StreamOptions,
   type StopReason,
+  type TextContent,
   type ToolCallContent,
   type Usage,
 } from "./types.js";
@@ -30,7 +32,9 @@ function apiKeyFor(model: Model, options?: StreamOptions): string {
   return options?.apiKey ?? (model.apiKeyEnv ? process.env[model.apiKeyEnv] : "") ?? "";
 }
 
-async function toOpenAIMessage(message: Message): Promise<Record<string, unknown>> {
+type NonToolMessage = Exclude<Message, { role: "toolResult" }>;
+
+async function toOpenAIMessage(message: NonToolMessage): Promise<Record<string, unknown>> {
   if (message.role === "user") {
     if (!message.images?.length) return { role: "user", content: message.content };
     const parts: Array<Record<string, unknown>> = [{ type: "text", text: message.content }];
@@ -66,14 +70,62 @@ async function toOpenAIMessage(message: Message): Promise<Record<string, unknown
       ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
     };
   }
-  if (message.role === "system") {
-    return { role: "system", content: message.content };
-  }
-  return {
-    role: "tool",
-    tool_call_id: message.toolCallId,
-    content: toolContentText(message.content),
+  return { role: "system", content: message.content };
+}
+
+/**
+ * Chat Completions tool messages carry strings only, so tool result images are
+ * lifted into a synthetic user message. OpenAI requires every tool message of a
+ * turn to sit contiguously after its assistant message, so images are buffered
+ * and flushed only when the run of tool results ends.
+ */
+async function toOpenAIMessages(messages: Message[]): Promise<Array<Record<string, unknown>>> {
+  const result: Array<Record<string, unknown>> = [];
+  let pending: ImageContent[] = [];
+
+  const flush = async (): Promise<void> => {
+    if (pending.length === 0) return;
+    const images = pending;
+    pending = [];
+    const parts: Array<Record<string, unknown>> = [
+      {
+        type: "text",
+        text: `↑ ${images.length} image(s) returned by tool calls: ${images
+          .map((image) => basename(image.path))
+          .join(", ")}`,
+      },
+    ];
+    for (const image of images) {
+      try {
+        const data = (await readFile(image.path)).toString("base64");
+        parts.push({
+          type: "image_url",
+          image_url: { url: `data:${image.mediaType};base64,${data}` },
+        });
+      } catch {
+        parts.push({ type: "text", text: `[图片不可用: ${image.path}]` });
+      }
+    }
+    result.push({ role: "user", content: parts });
   };
+
+  for (const message of messages) {
+    if (message.role === "toolResult") {
+      // Text only: the images travel in the synthetic user message instead,
+      // so a placeholder line here would duplicate them.
+      const text = message.content
+        .filter((block): block is TextContent => block.type === "text")
+        .map((block) => block.text)
+        .join("\n");
+      result.push({ role: "tool", tool_call_id: message.toolCallId, content: text });
+      pending.push(...message.content.filter((b): b is ImageContent => b.type === "image"));
+      continue;
+    }
+    await flush();
+    result.push(await toOpenAIMessage(message));
+  }
+  await flush();
+  return result;
 }
 
 function mergeUsage(target: Usage, raw: Record<string, unknown>): void {
@@ -134,7 +186,7 @@ export function streamOpenAI(
     try {
       body.messages = [
         { role: "system", content: context.systemPrompt },
-        ...(await Promise.all(context.messages.map(toOpenAIMessage))),
+        ...(await toOpenAIMessages(context.messages)),
       ];
       let response: Response | undefined;
       let lastError = "";

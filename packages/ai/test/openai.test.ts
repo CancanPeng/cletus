@@ -6,7 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   assistantMessage,
   type AssistantStreamEvent,
+  type Message,
   type Model,
+  type ToolContent,
 } from "../src/types.js";
 import { streamOpenAI } from "../src/openai.js";
 
@@ -269,5 +271,104 @@ describe("streamOpenAI", () => {
     const content = body?.messages[1]?.content as unknown[];
     expect(content).toContainEqual({ type: "text", text: `[图片不可用: ${missing}]` });
     expect(content).toContainEqual({ type: "text", text: "analyze" });
+  });
+});
+
+async function captureBody(
+  messages: Parameters<typeof streamOpenAI>[1]["messages"],
+): Promise<Array<Record<string, unknown>>> {
+  process.env["FAKE_KEY"] = "test";
+  let body: Array<Record<string, unknown>> | undefined;
+  const port = await listen((req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
+    req.on("end", () => {
+      body = (JSON.parse(raw) as { messages: Array<Record<string, unknown>> }).messages;
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n');
+      res.end("data: [DONE]\n\n");
+    });
+  });
+  model.baseUrl = `http://127.0.0.1:${port}/v1`;
+  await collect(streamOpenAI(model, { systemPrompt: "s", messages, tools: [] }));
+  if (!body) throw new Error("no request body captured");
+  return body;
+}
+
+function toolResult(toolCallId: string, content: ToolContent[]): Message {
+  return { role: "toolResult", toolCallId, toolName: "read", content, isError: false, timestamp: 1 };
+}
+
+function assistantWithCalls(ids: string[]): Message {
+  return {
+    role: "assistant",
+    content: ids.map((id) => ({ type: "toolCall" as const, id, name: "read", arguments: {} })),
+    provider: "openai",
+    model: "fake",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+    stopReason: "toolUse",
+    timestamp: 1,
+  };
+}
+
+describe("streamOpenAI tool result images", () => {
+  it("moves a tool_result image into a trailing user message", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cletus-openai-img-"));
+    const imgPath = join(dir, "a.png");
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    await writeFile(imgPath, bytes);
+    const messages = await captureBody([
+      assistantWithCalls(["call_1"]),
+      toolResult("call_1", [
+        { type: "text", text: "a.png — image/png" },
+        { type: "image", mediaType: "image/png", path: imgPath },
+      ]),
+    ]);
+    expect(messages[2]).toEqual({
+      role: "tool",
+      tool_call_id: "call_1",
+      content: "a.png — image/png",
+    });
+    expect(messages[3]).toMatchObject({ role: "user" });
+    const parts = messages[3]?.["content"] as unknown[];
+    expect(parts[0]).toEqual({ type: "text", text: "↑ 1 image(s) returned by tool calls: a.png" });
+    expect(parts[1]).toEqual({
+      type: "image_url",
+      image_url: { url: `data:image/png;base64,${bytes.toString("base64")}` },
+    });
+  });
+
+  it("keeps parallel tool messages contiguous and emits one combined user message", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cletus-openai-img2-"));
+    const a = join(dir, "a.png");
+    const b = join(dir, "b.jpg");
+    await writeFile(a, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    await writeFile(b, Buffer.from([0xff, 0xd8, 0xff]));
+    const messages = await captureBody([
+      assistantWithCalls(["call_1", "call_2"]),
+      toolResult("call_1", [
+        { type: "text", text: "a.png" },
+        { type: "image", mediaType: "image/png", path: a },
+      ]),
+      toolResult("call_2", [
+        { type: "text", text: "b.jpg" },
+        { type: "image", mediaType: "image/jpeg", path: b },
+      ]),
+    ]);
+    expect(messages.map((m) => m["role"])).toEqual(["system", "assistant", "tool", "tool", "user"]);
+    const parts = messages[4]?.["content"] as unknown[];
+    expect(parts[0]).toEqual({
+      type: "text",
+      text: "↑ 2 image(s) returned by tool calls: a.png, b.jpg",
+    });
+    expect(parts).toHaveLength(3);
+  });
+
+  it("emits no synthetic user message for text-only tool results", async () => {
+    const messages = await captureBody([
+      assistantWithCalls(["call_1"]),
+      toolResult("call_1", [{ type: "text", text: "plain" }]),
+    ]);
+    expect(messages.map((m) => m["role"])).toEqual(["system", "assistant", "tool"]);
   });
 });
