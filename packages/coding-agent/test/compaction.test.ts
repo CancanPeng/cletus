@@ -132,6 +132,81 @@ describe("compaction", () => {
     for (const id of callIds) expect(resultIds.has(id)).toBe(true);
   });
 
+  it("still keeps the recent window when a forced cut runs on an oversized branch", async () => {
+    const manager = SessionManager.inMemory(process.cwd());
+    // Auto-compaction also passes force:true once the trigger decided; a
+    // branch far above keepRecentTokens must keep ~keepRecentTokens of tail,
+    // not collapse to the final exchange.
+    for (let index = 0; index < 40; index += 1) {
+      await manager.appendMessage({
+        role: index % 2 === 0 ? "user" : "assistant",
+        ...(index % 2 === 0
+          ? { content: `user ${index} ${"x".repeat(400)}` }
+          : {
+              content: [{ type: "text" as const, text: `assistant ${index} ${"y".repeat(400)}` }],
+              provider: "openai",
+              model: "fake",
+              usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 },
+              stopReason: "stop" as const,
+            }),
+        timestamp: index,
+      } as AgentMessage);
+    }
+    const branch = manager.getBranch();
+    const cut = selectCut(branch, 1000, { force: true });
+    expect(cut).toBeGreaterThan(0);
+    const keptTokens = branch.slice(cut).reduce((total, entry) => {
+      if (entry.type !== "message" || entry.message.role === "custom") return total;
+      const text =
+        entry.message.role === "user"
+          ? entry.message.content
+          : entry.message.role === "assistant"
+            ? entry.message.content.map((block) => (block.type === "text" ? block.text : "")).join("")
+            : "";
+      return total + Math.ceil(text.length / 4);
+    }, 0);
+    expect(keptTokens).toBeGreaterThanOrEqual(1000);
+  });
+
+  it("compacts everything before the last exchange when forced below the keep-recent window", async () => {
+    const manager = SessionManager.inMemory(process.cwd());
+    // ~600 tokens: far below keepRecentTokens=20000, but a manual /compact
+    // must still summarize the older turns and keep only the last exchange.
+    for (let index = 0; index < 6; index += 1) {
+      await manager.appendMessage({
+        role: index % 2 === 0 ? "user" : "assistant",
+        ...(index % 2 === 0
+          ? { content: `user ${index} ${"x".repeat(300)}` }
+          : {
+              content: [{ type: "text" as const, text: `assistant ${index} ${"y".repeat(300)}` }],
+              provider: "openai",
+              model: "fake",
+              usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 },
+              stopReason: "stop" as const,
+            }),
+        timestamp: index,
+      } as AgentMessage);
+    }
+    const streamFn: StreamFn = (): AssistantEventStream => {
+      const stream = new AssistantEventStream();
+      stream.end(assistantMessage(model, [{ type: "text", text: "## Goal\nsummarized" }], "stop"));
+      return stream;
+    };
+    const result = await compact(manager, model, streamFn, {
+      keepRecentTokens: 20000,
+      force: true,
+    });
+    expect("skipped" in result).toBe(false);
+    const projection = buildProjection(manager);
+    const texts = projection.messages.map((message) =>
+      message.role === "user" ? message.content : "",
+    );
+    expect(texts.some((text) => text.includes("summarized"))).toBe(true);
+    // Only the last user/assistant exchange survives verbatim.
+    expect(texts.some((text) => text.includes("user 4"))).toBe(true);
+    expect(texts.some((text) => text.includes("user 0"))).toBe(false);
+  });
+
   it("lists attached images by basename in the summary input", async () => {
     const manager = SessionManager.inMemory(process.cwd());
     await manager.appendMessage({

@@ -430,6 +430,61 @@ describe("TuiApp", () => {
     await ctx.dispose();
   });
 
+  it("animates a progress bar while a progress block is running and settles on done", async () => {
+    const ctx = await setupApp();
+    ctx.app.appendBlock({
+      id: "compact-1",
+      kind: "progress",
+      label: "Compacting context",
+      status: "running",
+      startedAt: Date.now(),
+    });
+    await ctx.flush();
+    const first = ctx.captureCharFrame();
+    expect(first).toContain("Compacting context");
+    // Indeterminate bar: 24 cells, 6 filled, bouncing.
+    expect(first).toContain("█".repeat(6));
+    expect(first).toContain("░".repeat(18));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await ctx.flush();
+    const moved = ctx.captureCharFrame();
+    expect(moved).toContain("█".repeat(6));
+    // The bar must actually move, not render a static strip.
+    const barOf = (frame: string): string =>
+      frame.split("\n").find((line) => line.includes("█")) ?? "";
+    expect(barOf(moved)).not.toBe(barOf(first));
+    ctx.app.updateBlock("compact-1", { kind: "progress", status: "done", detail: "38k → 24k" });
+    await ctx.flush();
+    const done = ctx.captureCharFrame();
+    expect(done).toContain("Compacting context");
+    expect(done).toContain("38k → 24k");
+    expect(done).not.toContain("░");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
+  it("renders a failed progress block as an error without a bar", async () => {
+    const ctx = await setupApp();
+    ctx.app.appendBlock({
+      id: "compact-err",
+      kind: "progress",
+      label: "Compacting context",
+      status: "running",
+    });
+    await ctx.flush();
+    ctx.app.updateBlock("compact-err", {
+      kind: "progress",
+      status: "error",
+      detail: "Compaction failed: empty summary",
+    });
+    await ctx.flush();
+    const frame = ctx.captureCharFrame();
+    expect(frame).toContain("Compaction failed: empty summary");
+    expect(frame).not.toContain("░");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
   it("previews collapsed tool output and expands on toggle", async () => {
     const ctx = await setupApp();
     ctx.app.appendBlock({

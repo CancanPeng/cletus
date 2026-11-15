@@ -28,7 +28,7 @@ import { ExtensionHost } from "./extensions/host.js";
 import { McpManager } from "./mcp/manager.js";
 import { loadMcpConfig } from "./mcp/config.js";
 import { PermissionPolicy } from "./permissions/policy.js";
-import { AgentSession } from "./session/session.js";
+import { AgentSession, type CompactionProgress } from "./session/session.js";
 import { SessionManager } from "./session/manager.js";
 import { buildProjection } from "./session/context.js";
 import { runFork } from "./session/fork.js";
@@ -217,6 +217,7 @@ async function createSessionFor(opts: {
   mcp: McpManager;
   extensions: ExtensionHost;
   onNotice: (text: string, level?: "info" | "warn" | "error") => void;
+  onCompaction?: (event: CompactionProgress) => void;
 }): Promise<AgentSession> {
   return AgentSession.create({
     cwd: opts.cwd,
@@ -230,6 +231,7 @@ async function createSessionFor(opts: {
     mcp: opts.mcp,
     extensions: opts.extensions,
     onNotice: opts.onNotice,
+    ...(opts.onCompaction ? { onCompaction: opts.onCompaction } : {}),
   });
 }
 
@@ -266,6 +268,34 @@ async function runTui(opts: {
 
   const confirm = async (req: { summary: string }): Promise<"allow" | "session" | "deny"> =>
     app ? app.confirm("Permission required", req.summary) : "deny";
+
+  let compactionBlockId: string | undefined;
+  const onCompaction = (event: CompactionProgress): void => {
+    if (event.type === "start") {
+      if (compactionBlockId) return; // one bar at a time
+      compactionBlockId = `compact-${Date.now()}`;
+      app?.appendBlock({
+        id: compactionBlockId,
+        kind: "progress",
+        label: "Compacting context",
+        status: "running",
+        startedAt: Date.now(),
+      });
+      return;
+    }
+    const id = compactionBlockId;
+    compactionBlockId = undefined;
+    if (!id) return;
+    if (event.type === "done") {
+      app?.updateBlock(id, {
+        kind: "progress",
+        status: "done",
+        detail: `${shortTokens(event.tokensBefore)} → ${shortTokens(event.tokensAfter)}`,
+      });
+    } else {
+      app?.updateBlock(id, { kind: "progress", status: "error", detail: event.message });
+    }
+  };
 
   const policy = new PermissionPolicy({
     cwd: opts.cwd,
@@ -431,6 +461,7 @@ async function runTui(opts: {
       mcp: opts.mcp,
       extensions: opts.extensions,
       onNotice: (text, level) => app?.notify(text, level),
+      onCompaction,
     });
     unsubscribe = session.subscribe(mapEvent);
     app?.setHeader(headerFor(opts.cwd, session.model, branch, currentTheme));
@@ -533,8 +564,8 @@ async function runTui(opts: {
           app?.notify("Cannot /compact while running", "warn");
           return;
         }
-        await session.compact(args || undefined);
-        app?.notify("Compaction complete");
+        const compacted = await session.compact(args || undefined);
+        if (compacted) app?.notify("Compaction complete");
       },
     },
     {

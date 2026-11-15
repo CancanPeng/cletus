@@ -133,6 +133,8 @@ Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a
 
 `/context` reports the current session: context window usage, cumulative input/output/total tokens across all model calls (including compacted history), and prompt-cache stats — hit (cache read), miss (uncached input), write, and hit rate.
 
+`/compact` shows an animated progress bar while summarizing (manually or automatically near the context limit), settling to the token reduction (e.g. `38k → 24k`) or an error.
+
 ## Skills
 
 `/skills` opens a tabbed popup manager (`Skills`, `Search`, `Install`). `Tab` / `Shift+Tab` switch tabs. Changes are saved immediately to `~/.cletus/config.json`.

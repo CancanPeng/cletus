@@ -141,6 +141,8 @@ Type `/` to open the command palette; use Up/Down, then Enter or Tab to insert a
 
 `/context` reports the current session: context window usage, cumulative input/output/total tokens across all model calls (including compacted history), and prompt-cache stats — hit (cache read), miss (uncached input), write, and hit rate. OpenAI-style usage where cached tokens are included in the input count is normalized so hits are never double-counted.
 
+`/compact` summarizes older turns into a compact summary, keeping the recent tail. A forced compaction on a small session keeps only the last exchange. While it runs (manually or automatically near the context limit) an animated progress bar is shown, settling to the token reduction (e.g. `38k → 24k`) or an error.
+
 ## Sessions
 
 `/new` opens a fresh session in the current directory, `/resume` lists the sessions recorded for it, and `/fork` branches an existing conversation. All three refuse to run while the agent is working.

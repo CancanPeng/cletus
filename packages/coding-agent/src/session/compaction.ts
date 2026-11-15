@@ -39,12 +39,52 @@ export function shouldCompact(
   return tokens > model.contextWindow - reserve;
 }
 
-export function selectCut(branch: SessionEntry[], keepRecentTokens: number): number {
+export function selectCut(
+  branch: SessionEntry[],
+  keepRecentTokens: number,
+  opts: { force?: boolean } = {},
+): number {
   if (branch.length === 0) return -1;
   const last = branch[branch.length - 1];
   let upper = branch.length;
   if (last?.type === "message" && last.message.role === "user") upper -= 1;
   if (upper <= 0) return -1;
+
+  // A forced (manual) compaction below the keep-recent window still shrinks
+  // the context: keep only the final user/assistant exchange (a trailing
+  // unanswered user message rides along) and summarize everything before it.
+  // Larger branches fall through to the normal keep-recent accounting.
+  if (opts.force && tokensOf(branch) < keepRecentTokens) {
+    let anchor = upper - 1;
+    while (anchor > 0) {
+      const entry = branch[anchor];
+      if (
+        entry?.type === "message" &&
+        (entry.message.role === "user" || entry.message.role === "assistant")
+      ) {
+        break;
+      }
+      anchor -= 1;
+    }
+    const anchorEntry = branch[anchor];
+    let exchange = -1;
+    if (anchorEntry?.type === "message" && anchorEntry.message.role === "user") {
+      exchange = anchor;
+    } else if (anchorEntry?.type === "message" && anchorEntry.message.role === "assistant") {
+      for (let index = anchor - 1; index >= 0; index -= 1) {
+        const entry = branch[index];
+        if (entry?.type === "message" && entry.message.role === "user") {
+          exchange = index;
+          break;
+        }
+      }
+    }
+    // The exchange starts at a user message, so the boundary is safe: every
+    // tool call at or after it has its results later in the branch.
+    if (exchange > 0 && tokensOf(branch.slice(exchange)) < keepRecentTokens) {
+      return exchange;
+    }
+  }
 
   let tokens = 0;
   for (let index = upper - 1; index >= 0; index -= 1) {
@@ -152,7 +192,7 @@ export async function compact(
     if (!shouldCompact(tokensBefore, model, cfg)) return { skipped: true };
   }
 
-  const cut = selectCut(branch, opts.keepRecentTokens);
+  const cut = selectCut(branch, opts.keepRecentTokens, { force: opts.force === true });
   if (cut <= 0) return { skipped: true };
 
   let previousCompaction: SessionEntry | undefined;

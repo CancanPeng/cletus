@@ -101,7 +101,15 @@ export type TranscriptBlock =
       duration?: string;
       startedAt?: number;
     }
-  | { id: string; kind: "notice"; text: string; level: "info" | "warn" | "error" };
+  | { id: string; kind: "notice"; text: string; level: "info" | "warn" | "error" }
+  | {
+      id: string;
+      kind: "progress";
+      label: string;
+      status?: "running" | "done" | "error";
+      detail?: string;
+      startedAt?: number;
+    };
 
 type BlockView =
   | { kind: "user"; box: BoxRenderable; text: TextRenderable }
@@ -120,7 +128,8 @@ type BlockView =
       preview: TextRenderable;
       output: TextRenderable;
     }
-  | { kind: "notice"; box: BoxRenderable; text: TextRenderable };
+  | { kind: "notice"; box: BoxRenderable; text: TextRenderable }
+  | { kind: "progress"; box: BoxRenderable; title: TextRenderable; bar: TextRenderable };
 
 type SelectState = {
   title: string;
@@ -142,6 +151,15 @@ function formatElapsed(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   const rest = Math.round(seconds % 60);
   return `${minutes}m ${rest}s`;
+}
+
+/** Indeterminate bar: a fixed-width chunk bouncing inside a 24-cell track. */
+export function progressBar(phase: number, width = 24, chunk = 6): string {
+  const travel = width - chunk;
+  const cycle = travel * 2;
+  const step = ((phase % cycle) + cycle) % cycle;
+  const offset = step <= travel ? step : cycle - step;
+  return "░".repeat(offset) + "█".repeat(chunk) + "░".repeat(travel - offset);
 }
 
 function toolPreview(output: string, isError: boolean, arrow: string): string {
@@ -234,6 +252,8 @@ export class TuiApp {
   private spinnerTimer: NodeJS.Timeout | undefined;
   private toolSpinner = 0;
   private toolTicker: NodeJS.Timeout | undefined;
+  private progressPhase = 0;
+  private progressTicker: NodeJS.Timeout | undefined;
   private clipboard: ClipboardService | undefined;
   private readonly pendingImages: ImageAttachment[] = [];
   private readonly blocks = new Map<string, TranscriptBlock>();
@@ -408,6 +428,8 @@ export class TuiApp {
     this.spinnerTimer = undefined;
     clearInterval(this.toolTicker);
     this.toolTicker = undefined;
+    clearInterval(this.progressTicker);
+    this.progressTicker = undefined;
     void this.clipboard?.dispose();
     this.clipboard = undefined;
     this.modal?.resolve("deny");
@@ -450,6 +472,7 @@ export class TuiApp {
     const follow = stored.kind === "user" || this.isAtBottom();
     this.addView(stored, follow);
     this.updateToolTickerState();
+    this.updateProgressTickerState();
   }
 
   updateBlock(id: string, patch: Partial<TranscriptBlock>): void {
@@ -461,6 +484,7 @@ export class TuiApp {
     this.blocks.set(id, next);
     this.updateView(next);
     this.updateToolTickerState();
+    this.updateProgressTickerState();
   }
 
   setStatus(status: {
@@ -554,6 +578,7 @@ export class TuiApp {
     this.blocks.clear();
     this.order.length = 0;
     this.scrollbox?.scrollTo(0);
+    this.updateProgressTickerState();
   }
 
   private static filterItems(items: ManagedItem[], query: string): ManagedItem[] {
@@ -853,6 +878,58 @@ export class TuiApp {
     }, 100);
   }
 
+  private progressStatus(
+    block: Extract<TranscriptBlock, { kind: "progress" }>,
+  ): "running" | "done" | "error" {
+    return block.status ?? "running";
+  }
+
+  private progressTitle(block: Extract<TranscriptBlock, { kind: "progress" }>): string {
+    const status = this.progressStatus(block);
+    const icon =
+      status === "error"
+        ? this.symbol("toolError")
+        : status === "done"
+          ? this.symbol("toolSuccess")
+          : this.theme.spinner[this.toolSpinner % this.theme.spinner.length] ??
+            this.symbol("toolRunning");
+    const elapsed =
+      status === "running" && block.startedAt !== undefined
+        ? formatElapsed(Date.now() - block.startedAt)
+        : undefined;
+    const suffix = block.detail ?? elapsed;
+    return `${icon} ${block.label}${suffix ? ` · ${suffix}` : ""}`;
+  }
+
+  private updateProgressTickerState(): void {
+    let running = false;
+    for (const block of this.blocks.values()) {
+      if (block.kind === "progress" && this.progressStatus(block) === "running") {
+        running = true;
+        break;
+      }
+    }
+    if (!running) {
+      clearInterval(this.progressTicker);
+      this.progressTicker = undefined;
+      return;
+    }
+    if (this.progressTicker) return;
+    this.progressTicker = setInterval(() => {
+      this.progressPhase += 1;
+      this.toolSpinner = (this.toolSpinner + 1) % this.theme.spinner.length;
+      for (const [id, block] of this.blocks) {
+        if (block.kind !== "progress" || this.progressStatus(block) !== "running") continue;
+        const view = this.views.get(id);
+        if (view?.kind === "progress") {
+          view.title.content = this.progressTitle(block);
+          view.bar.content = progressBar(this.progressPhase);
+        }
+      }
+      this.renderer?.requestRender();
+    }, 120);
+  }
+
   private createView(block: TranscriptBlock): BlockView {
     const box = this.baseBox(`block-${block.id}`);
     if (block.kind === "user") {
@@ -934,6 +1011,27 @@ export class TuiApp {
       box.add(output);
       return { kind: "tool", box, title, args, separator, preview, output };
     }
+    if (block.kind === "progress") {
+      const status = this.progressStatus(block);
+      const title = new TextRenderable(this.renderer!, {
+        content: this.progressTitle(block),
+        fg: status === "error" ? this.color("error") : this.color("accent"),
+        wrapMode: "none",
+        truncate: true,
+        width: "100%",
+      });
+      const bar = new TextRenderable(this.renderer!, {
+        content: progressBar(this.progressPhase),
+        fg: this.color("accent"),
+        wrapMode: "none",
+        truncate: true,
+        width: "100%",
+        visible: status === "running",
+      });
+      box.add(title);
+      box.add(bar);
+      return { kind: "progress", box, title, bar };
+    }
     const text = new TextRenderable(this.renderer!, {
       content: `! ${block.text}`,
       fg:
@@ -975,6 +1073,17 @@ export class TuiApp {
       if (block.expanded) view.output.content = block.output;
       view.output.fg = block.isError ? this.color("error") : this.color("fg");
       view.output.visible = block.expanded;
+    } else if (view.kind === "progress" && block.kind === "progress") {
+      const status = this.progressStatus(block);
+      view.title.content = this.progressTitle(block);
+      view.title.fg =
+        status === "error"
+          ? this.color("error")
+          : status === "done"
+            ? this.color("success")
+            : this.color("accent");
+      view.bar.visible = status === "running";
+      if (status === "running") view.bar.content = progressBar(this.progressPhase);
     } else if (view.kind === "notice" && block.kind === "notice") {
       view.text.content = `! ${block.text}`;
     }

@@ -22,9 +22,14 @@ import { createTaskTool } from "../tools/task.js";
 import { SessionManager } from "./manager.js";
 import { buildProjection } from "./context.js";
 import { summarizeUsage, type UsageStats } from "./usage.js";
-import { compact, shouldCompact } from "./compaction.js";
+import { compact, selectCut, shouldCompact } from "./compaction.js";
 import type { McpManager } from "../mcp/manager.js";
 import type { ExtensionHost } from "../extensions/host.js";
+
+export type CompactionProgress =
+  | { type: "start" }
+  | { type: "done"; tokensBefore: number; tokensAfter: number }
+  | { type: "error"; message: string };
 
 export type CreateSessionOptions = {
   cwd: string;
@@ -37,6 +42,7 @@ export type CreateSessionOptions = {
   mcp?: McpManager;
   extensions?: ExtensionHost;
   onNotice?: (text: string, level?: "info" | "warn" | "error") => void;
+  onCompaction?: (event: CompactionProgress) => void;
   streamFn?: StreamFn;
   home?: string;
 };
@@ -301,21 +307,47 @@ export class AgentSession {
     const tokens = estimateContextTokens(llm);
     const reserve = this.options.config.compaction.reserveTokens;
     if (shouldCompact(tokens, this.model, this.options.config.compaction)) {
-      this.options.onNotice?.("Compacting context...");
+      this.options.onCompaction?.({ type: "start" });
       const apiKey = resolveApiKey(this.options.config, this.options.auth, this.model);
-      // The trigger above already decided; force so compact() does not
-      // re-check with a different (messages-only) token accounting.
-      await compact(this.manager, this.model, this.streamFn, {
-        keepRecentTokens: this.options.config.compaction.keepRecentTokens,
-        reserveTokens: reserve,
-        force: true,
-        ...(apiKey ? { apiKey } : {}),
-      });
+      try {
+        // The trigger above already decided; force so compact() does not
+        // re-check with a different (messages-only) token accounting.
+        await compact(this.manager, this.model, this.streamFn, {
+          keepRecentTokens: this.options.config.compaction.keepRecentTokens,
+          reserveTokens: reserve,
+          force: true,
+          ...(apiKey ? { apiKey } : {}),
+        });
+      } catch (error) {
+        this.options.onCompaction?.({
+          type: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
       const projection = buildProjection(this.manager);
       this.agent.replaceProjection(projection.messages);
+      const messages = this.projectForModel(projection.messages);
+      this.options.onCompaction?.({
+        type: "done",
+        tokensBefore: tokens,
+        tokensAfter: estimateContextTokens({
+          systemPrompt: this.systemPrompt,
+          messages: messages.map((message) =>
+            message.role === "custom"
+              ? {
+                  role: "user" as const,
+                  content: `[${message.customType}]\n${message.content}`,
+                  timestamp: message.timestamp,
+                }
+              : message,
+          ),
+          tools: llm.tools,
+        }),
+      });
       return {
         systemPrompt: this.systemPrompt,
-        messages: this.projectForModel(projection.messages),
+        messages,
       };
     }
     return { systemPrompt: this.systemPrompt, messages: this.projectForModel(ctx.messages) };
@@ -342,21 +374,51 @@ export class AgentSession {
     return this.agent.subscribe(listener);
   }
 
-  async compact(instructions?: string): Promise<void> {
+  /** Returns true when the conversation was compacted, false when skipped. */
+  async compact(instructions?: string): Promise<boolean> {
     const apiKey = resolveApiKey(this.options.config, this.options.auth, this.model);
-    const result = await compact(this.manager, this.model, this.streamFn, {
-      keepRecentTokens: this.options.config.compaction.keepRecentTokens,
-      reserveTokens: this.options.config.compaction.reserveTokens,
-      force: true,
-      ...(instructions ? { instructions } : {}),
-      ...(apiKey ? { apiKey } : {}),
-    });
-    if ("skipped" in result) {
+    const keepRecentTokens = this.options.config.compaction.keepRecentTokens;
+    // Decide before announcing: a skipped compaction must not flash a
+    // progress bar (same deterministic check compact() runs internally).
+    if (selectCut(this.manager.getBranch(), keepRecentTokens, { force: true }) <= 0) {
       this.options.onNotice?.("Nothing to compact");
-      return;
+      return false;
+    }
+    const tokensBefore = this.getContextUsage().used;
+    this.options.onCompaction?.({ type: "start" });
+    let result: Awaited<ReturnType<typeof compact>>;
+    try {
+      result = await compact(this.manager, this.model, this.streamFn, {
+        keepRecentTokens,
+        reserveTokens: this.options.config.compaction.reserveTokens,
+        force: true,
+        ...(instructions ? { instructions } : {}),
+        ...(apiKey ? { apiKey } : {}),
+      });
+    } catch (error) {
+      this.options.onCompaction?.({
+        type: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+    if ("skipped" in result) {
+      this.options.onCompaction?.({
+        type: "done",
+        tokensBefore,
+        tokensAfter: tokensBefore,
+      });
+      this.options.onNotice?.("Nothing to compact");
+      return false;
     }
     const projection = buildProjection(this.manager);
     this.agent.replaceProjection(projection.messages);
+    this.options.onCompaction?.({
+      type: "done",
+      tokensBefore,
+      tokensAfter: this.getContextUsage().used,
+    });
+    return true;
   }
 
   async switchModel(model: Model): Promise<void> {
