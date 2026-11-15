@@ -565,7 +565,19 @@ async function runTui(opts: {
           return;
         }
         const compacted = await session.compact(args || undefined);
-        if (compacted) app?.notify("Compaction complete");
+        if (compacted) {
+          // Manual compaction emits no agent event, so the status bar would
+          // keep showing the pre-compaction token count until the next turn.
+          app?.setStatus({
+            busy: false,
+            model: session.model.ref ?? session.model.id,
+            tokens: "",
+            queue: session.agent.queuedMessageCount,
+            context: contextLabel(session),
+            ...(lastDuration ? { duration: lastDuration } : {}),
+          });
+          app?.notify("Compaction complete");
+        }
       },
     },
     {
