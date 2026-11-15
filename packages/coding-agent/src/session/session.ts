@@ -464,12 +464,20 @@ export class AgentSession {
       description: tool.description,
       parameters: tool.parameters,
     }));
+    // No conversation yet: nothing has been sent to the model, so report 0
+    // rather than the system-prompt/tooling overhead. Once messages exist the
+    // full estimate (including that overhead) is shown, since every request
+    // really does carry it.
+    const used =
+      messages.length === 0
+        ? 0
+        : estimateContextTokens({
+            systemPrompt: this.systemPrompt,
+            messages,
+            tools,
+          });
     return {
-      used: estimateContextTokens({
-        systemPrompt: this.systemPrompt,
-        messages,
-        tools,
-      }),
+      used,
       window: this.model.contextWindow,
     };
   }

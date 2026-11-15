@@ -465,6 +465,18 @@ async function runTui(opts: {
     });
     unsubscribe = session.subscribe(mapEvent);
     app?.setHeader(headerFor(opts.cwd, session.model, branch, currentTheme));
+    // Switching sessions (/new, /resume, /fork) emits no agent event, so the
+    // status bar would keep the previous session's token count and duration.
+    // Reset them to the new session's context usage.
+    conversationStart = undefined;
+    lastDuration = undefined;
+    app?.setStatus({
+      busy: false,
+      model: session.model.ref ?? session.model.id,
+      tokens: "",
+      queue: 0,
+      context: contextLabel(session),
+    });
   };
 
   // A fork starts from a projection, not from events, so the transcript has to

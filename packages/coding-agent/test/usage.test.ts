@@ -126,6 +126,58 @@ describe("contextReport", () => {
   });
 });
 
+describe("AgentSession.getContextUsage", () => {
+  const model: Model = {
+    provider: "openai",
+    id: "fake",
+    baseUrl: "http://localhost",
+    contextWindow: 100000,
+    maxOutputTokens: 1000,
+  };
+  async function sessionWith(manager: SessionManager, home: string, cwd: string) {
+    return AgentSession.create({
+      cwd,
+      home,
+      config: createDefaultConfig(),
+      auth: { keys: {} },
+      model,
+      sessionManager: manager,
+      permissions: new PermissionPolicy({
+        cwd,
+        readOnlyRoots: [],
+        allowWrite: [],
+        yolo: true,
+        interactive: false,
+      }),
+      resources: new ResourceLoader(cwd, home),
+    });
+  }
+
+  it("reports zero used for a session with no conversation", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    const manager = await SessionManager.create(cwd, { home });
+    const session = await sessionWith(manager, home, cwd);
+    const usage = session.getContextUsage();
+    expect(usage.used).toBe(0);
+    expect(usage.window).toBe(100000);
+    await session.dispose();
+  });
+
+  it("reports the full estimate once the conversation has messages", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    const manager = await SessionManager.create(cwd, { home });
+    await manager.appendMessage({ role: "user", content: "hello there", timestamp: 1 });
+    const session = await sessionWith(manager, home, cwd);
+    const usage = session.getContextUsage();
+    // System prompt + tools overhead alone is well above zero; the message
+    // adds more. The exact value depends on loaded skills, so assert a floor.
+    expect(usage.used).toBeGreaterThan(100);
+    await session.dispose();
+  });
+});
+
 describe("AgentSession.getUsageStats", () => {
   it("aggregates every model call in the session, including compacted history", async () => {
     const home = await temp();
