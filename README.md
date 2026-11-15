@@ -5,9 +5,9 @@ A pi-inspired terminal coding agent.
 ## Install
 
 ```bash
-npm i -g cletus
+npm i -g @cletusstar/cletus
 # or run without installing
-npx cletus
+npx @cletusstar/cletus
 ```
 
 Requires Node >= 26.4 on macOS or Linux. The TUI uses OpenTUI, which needs the FFI flag; the installed `cletus` shebang adds it automatically. When running the build directly, use `node --experimental-ffi packages/coding-agent/dist/cli.js`.
