@@ -14,10 +14,14 @@ import { PermissionPolicy } from "../src/permissions/policy.js";
 import { createSubagentRunner } from "../src/subagent.js";
 import { createTaskTool } from "../src/tools/task.js";
 
-const echoTool = (name: string, execute?: () => void): AgentTool => ({
+const echoTool = (
+  name: string,
+  execute?: () => void,
+  properties: Record<string, unknown> = {},
+): AgentTool => ({
   name,
   description: name,
-  parameters: { type: "object", properties: {} },
+  parameters: { type: "object", properties },
   execute: async (): Promise<ToolResult> => {
     execute?.();
     return { content: [{ type: "text", text: "ok" }] };
@@ -347,5 +351,113 @@ describe("subagent", () => {
     expect(texts.length).toBeGreaterThan(0);
     expect(texts.some((t) => t.includes("✗ ls") && t.includes("aborted"))).toBe(true);
     expect(texts.some((t) => t.includes("turn 2"))).toBe(false);
+  });
+
+  const toolCallThenDone = (
+    name: string,
+    args: Record<string, unknown>,
+  ): (() => AssistantEventStream) => {
+    let calls = 0;
+    return () => {
+      calls += 1;
+        const stream = new AssistantEventStream();
+        const message =
+          calls === 1
+            ? assistantMessage(
+                model,
+                [{ type: "toolCall", id: "c1", name, arguments: args }],
+                "toolUse",
+              )
+            : assistantMessage(model, [{ type: "text", text: "done" }], "stop");
+      stream.push({ type: "start", partial: assistantMessage(model, [], "stop") });
+      stream.end(message);
+      return stream;
+    };
+  };
+
+  it("inherits parent-approved commands without yolo", async () => {
+    const parent = new PermissionPolicy({
+      cwd: process.cwd(),
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: true,
+      confirm: async () => "allow",
+    });
+    expect((await parent.check("bash", { command: "pnpm test" })).allow).toBe(true);
+    let executed = false;
+    const run = createSubagentRunner({
+      cwd: process.cwd(),
+      model,
+      streamFn: toolCallThenDone("bash", { command: "pnpm test" }),
+      policy: parent,
+      createTools: () => [
+        echoTool("bash", () => (executed = true), { command: { type: "string" } }),
+      ],
+      buildSystemPrompt: () => "parent prompt",
+    });
+    await run({ description: "test", prompt: "child task" });
+    expect(executed).toBe(true);
+  });
+
+  it("denies commands outside the snapshot with actionable copy", async () => {
+    const parent = new PermissionPolicy({
+      cwd: process.cwd(),
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: true,
+      confirm: async () => "allow",
+    });
+    expect((await parent.check("bash", { command: "pnpm test" })).allow).toBe(true);
+    let executed = false;
+    const run = createSubagentRunner({
+      cwd: process.cwd(),
+      model,
+      streamFn: toolCallThenDone("bash", { command: "pnpm build" }),
+      policy: parent,
+      createTools: () => [
+        echoTool("bash", () => (executed = true), { command: { type: "string" } }),
+      ],
+      buildSystemPrompt: () => "parent prompt",
+    });
+    const texts: string[] = [];
+    await run({ description: "test", prompt: "child task", onProgress: (t) => texts.push(t) });
+    expect(executed).toBe(false);
+    // The progress line clips at 80 chars; assert the actionable head.
+    expect(
+      texts.some((t) => t.includes("Denied: not covered by inherited grants")),
+    ).toBe(true);
+  });
+
+  it("inherits persistent allowWrite for child writes", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "cletus-subagent-"));
+    try {
+      const parent = new PermissionPolicy({
+        cwd,
+        readOnlyRoots: [],
+        allowWrite: ["**"],
+        yolo: false,
+        interactive: false,
+      });
+      let executed = false;
+      const run = createSubagentRunner({
+        cwd,
+        model,
+        streamFn: toolCallThenDone("write", { path: "out.txt", content: "x" }),
+        policy: parent,
+        createTools: () => [
+          echoTool("write", () => (executed = true), {
+            path: { type: "string" },
+            content: { type: "string" },
+          }),
+        ],
+        buildSystemPrompt: () => "parent prompt",
+      });
+      await run({ description: "test", prompt: "child task" });
+      expect(executed).toBe(true);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 });

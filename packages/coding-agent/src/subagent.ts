@@ -14,12 +14,15 @@ export function createSubagentRunner(deps: {
   getApiKey?: (model: Model) => string | undefined;
 }): (req: SubagentRequest) => Promise<ToolResult> {
   return async (req: SubagentRequest): Promise<ToolResult> => {
+    // B-plan inheritance: a static snapshot of the parent's grants at spawn.
+    // The child stays non-interactive; later parent grants do not reach it.
     const policy = new PermissionPolicy({
       cwd: deps.cwd,
       readOnlyRoots: [],
       allowWrite: [],
       yolo: deps.policy.yolo,
       interactive: false,
+      inherit: deps.policy.snapshot(),
     });
     const tools = deps.createTools(deps.cwd, { excludeTask: true, policy });
     const systemPrompt = `${deps.buildSystemPrompt(tools)}\n\n<subagent>\nYou are a subagent. Work independently, do not ask questions, and finish with a concise report of findings and changes.\n</subagent>`;
