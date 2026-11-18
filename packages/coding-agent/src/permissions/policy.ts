@@ -28,8 +28,8 @@ export type PermissionSnapshot = {
   extraTools: string[];
 };
 
-const NON_INTERACTIVE_DENY =
-  "Denied: not covered by inherited grants or permissions rules (approve it in the main session, add a rule via /permissions add, or use --yolo)";
+const nonInteractiveDeny = (toolName: string): string =>
+  `Denied: ${toolName} not covered by inherited grants or permissions rules (approve it in the main session, add a permissions rule via /permissions add in the TUI or cletus permissions add on the CLI, or use --yolo)`;
 
 const READ_TOOLS: Record<string, true> = {
   read: true,
@@ -59,6 +59,11 @@ export class PermissionPolicy {
     yolo: boolean;
     interactive: boolean;
     confirm?: ConfirmFn;
+    /**
+     * Authoritative when present: allowWrite, yolo, readOnlyRoots and all
+     * session grants come from the snapshot, NOT from the sibling opts.
+     * Callers inheriting should omit those opts to avoid dead arguments.
+     */
     inherit?: PermissionSnapshot;
   }) {
     const inherited = opts.inherit;
@@ -162,7 +167,7 @@ export class PermissionPolicy {
     summary: string,
   ): Promise<{ allow: boolean; reason?: string }> {
     if (!this.interactive || !this.confirm) {
-      return { allow: false, reason: NON_INTERACTIVE_DENY };
+      return { allow: false, reason: nonInteractiveDeny(toolName) };
     }
     const decision = await this.confirm({ toolName, args, summary });
     if (decision === "deny") return { allow: false, reason: "Denied by user" };
@@ -195,7 +200,7 @@ export class PermissionPolicy {
       if (await this.isWriteAllowed(resolved)) return { allow: true };
       if (this.yolo) return { allow: true };
       if (!this.interactive) {
-        return { allow: false, reason: NON_INTERACTIVE_DENY };
+        return { allow: false, reason: nonInteractiveDeny(toolName) };
       }
       const summary =
         toolName === "write"
@@ -211,7 +216,7 @@ export class PermissionPolicy {
       if (this.yolo) return { allow: true };
       if (this.sessionMcpTools.has(toolName)) return { allow: true };
       if (!this.interactive) {
-        return { allow: false, reason: NON_INTERACTIVE_DENY };
+        return { allow: false, reason: nonInteractiveDeny(toolName) };
       }
       const decision = await this.ask(toolName, args, `MCP tool ${toolName}`);
       if (decision.allow) this.sessionMcpTools.add(toolName);
@@ -236,7 +241,7 @@ export class PermissionPolicy {
       const requestKey = headerKeys ? `${urls}\n${headerKeys}` : urls;
       if (this.sessionCurls.has(requestKey)) return { allow: true };
       if (!this.interactive) {
-        return { allow: false, reason: NON_INTERACTIVE_DENY };
+        return { allow: false, reason: nonInteractiveDeny(toolName) };
       }
       const decision = await this.ask(
         toolName,
@@ -252,7 +257,7 @@ export class PermissionPolicy {
       const query = String(args["query"] ?? "");
       if (this.sessionSearches.has(query)) return { allow: true };
       if (!this.interactive) {
-        return { allow: false, reason: NON_INTERACTIVE_DENY };
+        return { allow: false, reason: nonInteractiveDeny(toolName) };
       }
       const decision = await this.ask(toolName, args, `Web search: ${query}`);
       if (decision.allow) this.sessionSearches.add(query);
@@ -264,7 +269,7 @@ export class PermissionPolicy {
       const command = String(args["command"] ?? "");
       if (this.sessionCommands.has(command)) return { allow: true };
       if (!this.interactive) {
-        return { allow: false, reason: NON_INTERACTIVE_DENY };
+        return { allow: false, reason: nonInteractiveDeny(toolName) };
       }
       const decision = await this.ask(toolName, args, command);
       if (decision.allow) this.sessionCommands.add(command);
@@ -275,7 +280,7 @@ export class PermissionPolicy {
       if (this.yolo) return { allow: true };
       if (this.sessionExtraTools.has(toolName)) return { allow: true };
       if (!this.interactive) {
-        return { allow: false, reason: NON_INTERACTIVE_DENY };
+        return { allow: false, reason: nonInteractiveDeny(toolName) };
       }
       const decision = await this.ask(toolName, args, `Extension tool ${toolName}`);
       if (decision.allow) this.sessionExtraTools.add(toolName);

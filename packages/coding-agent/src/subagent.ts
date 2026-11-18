@@ -15,12 +15,13 @@ export function createSubagentRunner(deps: {
 }): (req: SubagentRequest) => Promise<ToolResult> {
   return async (req: SubagentRequest): Promise<ToolResult> => {
     // B-plan inheritance: a static snapshot of the parent's grants at spawn.
-    // The child stays non-interactive; later parent grants do not reach it.
+    // The snapshot is authoritative (allowWrite/yolo/roots come from it);
+    // the child stays non-interactive and later parent grants do not reach it.
     const policy = new PermissionPolicy({
       cwd: deps.cwd,
       readOnlyRoots: [],
       allowWrite: [],
-      yolo: deps.policy.yolo,
+      yolo: false,
       interactive: false,
       inherit: deps.policy.snapshot(),
     });

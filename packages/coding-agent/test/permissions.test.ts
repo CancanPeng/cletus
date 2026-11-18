@@ -211,7 +211,7 @@ describe("permission policy", () => {
   });
 
   const DENY_COPY =
-    "Denied: not covered by inherited grants or permissions rules (approve it in the main session, add a rule via /permissions add, or use --yolo)";
+    "Denied: write not covered by inherited grants or permissions rules (approve it in the main session, add a permissions rule via /permissions add in the TUI or cletus permissions add on the CLI, or use --yolo)";
 
   it("snapshot round-trips grants into a new policy", async () => {
     const cwd = await temp();
@@ -306,7 +306,30 @@ describe("permission policy", () => {
     });
     const denied = await policy.check("bash", { command: "ls" });
     expect(denied.allow).toBe(false);
-    expect(denied.reason).toContain("/permissions add");
+    expect(denied.reason).toContain("bash");
+    expect(denied.reason).toContain("cletus permissions add");
     expect(denied.reason).toContain("--yolo");
+  });
+
+  it("inherit is authoritative over constructor opts", async () => {
+    const cwd = await temp();
+    const parent = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: ["src/**"],
+      yolo: true,
+      interactive: false,
+    });
+    // Conflicting explicit opts must not wipe or override the snapshot.
+    const child = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: false,
+      inherit: parent.snapshot(),
+    });
+    expect(child.yolo).toBe(true);
+    expect((await child.check("write", { path: "src/a.ts", content: "x" })).allow).toBe(true);
   });
 });

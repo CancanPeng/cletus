@@ -426,7 +426,7 @@ describe("subagent", () => {
     expect(executed).toBe(false);
     // The progress line clips at 80 chars; assert the actionable head.
     expect(
-      texts.some((t) => t.includes("Denied: not covered by inherited grants")),
+      texts.some((t) => t.includes("Denied: bash not covered by inherited grants")),
     ).toBe(true);
   });
 
