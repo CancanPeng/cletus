@@ -165,6 +165,68 @@ describe("TuiApp", () => {
     expect(symbols.symbol("model")).toBe("\uf2db");
   });
 
+  it("keeps the copy toast out of the transcript and hides it after 2s", async () => {
+    const ctx = await setupApp();
+    ctx.app.toast("Copied 9 chars");
+    await ctx.flush();
+    const lines = ctx.captureCharFrame().split("\n");
+    const row = lines.findIndex((line) => line.includes("Copied 9 chars"));
+    expect(row).toBeGreaterThan(lines.length / 2);
+    // Bottom-right float: the box hugs the frame's right edge.
+    expect(lines[row]!.trimEnd().endsWith("│")).toBe(true);
+    expect(lines[row]!.indexOf("╭")).toBe(-1);
+    expect(lines[row]!.indexOf("│ Copied")).toBeGreaterThan(60);
+    // It is a toast, not a transcript notice.
+    expect(ctx.captureCharFrame()).not.toContain("! Copied 9 chars");
+    await new Promise((resolve) => setTimeout(resolve, 2100));
+    await ctx.flush();
+    expect(ctx.captureCharFrame()).not.toContain("Copied 9 chars");
+    ctx.app.stop();
+    await ctx.dispose();
+  });
+
+  it("keeps the editor focused when transcript text is selected with the mouse", async () => {
+    const test = await createTestRenderer({ width: 80, height: 24, exitOnCtrlC: false, useMouse: true });
+    const written: string[] = [];
+    const clipboard = {
+      read: async () => ({ status: "empty" }),
+      writeText: async (text: string) => {
+        written.push(text);
+        return { host: { status: "written" }, terminal: { status: "not-attempted" } };
+      },
+      clear: async () => ({ host: { status: "written" }, terminal: { status: "not-attempted" } }),
+      dispose: async () => undefined,
+    } as unknown as ClipboardService;
+    const app = new TuiApp({
+      header: "cletus test",
+      theme: getTheme("dark", { preset: "unicode" }),
+      keybindings: new KeybindingsManager({}),
+      submit: async () => undefined,
+      abort: () => undefined,
+      commands: [],
+      history: [],
+      renderer: test.renderer,
+      clipboard,
+    });
+    await app.start();
+    app.appendBlock({ id: "u1", kind: "user", text: "hello selection world" });
+    await test.flush();
+    await test.mockMouse.pressDown(3, 0, 0);
+    await test.flush();
+    await test.mockMouse.moveTo(20, 0);
+    await test.flush();
+    await test.mockMouse.release(20, 0, 0);
+    await test.flush();
+    expect(written).toEqual(["hello selection wo"]);
+    // Selecting must not leave focus on the transcript box, or typing is lost.
+    expect(test.renderer.currentFocusedRenderable?.id).toBe("editor");
+    test.mockInput.typeText("zz");
+    await test.flush();
+    expect(test.captureCharFrame()).toContain("zz");
+    app.stop();
+    await test.dispose();
+  });
+
   it("switches symbol presets", async () => {
     const ctx = await setupApp();
     const ascii = getTheme("dark", {

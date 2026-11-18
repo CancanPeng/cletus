@@ -198,6 +198,10 @@ export class TuiApp {
   private footerLeft: TextRenderable | undefined;
   private footerRight: TextRenderable | undefined;
   private modalBox: BoxRenderable | undefined;
+  private toastBox: BoxRenderable | undefined;
+  private toastText: TextRenderable | undefined;
+  private toastColor: ThemeToken = "success";
+  private toastTimer: NodeJS.Timeout | undefined;
   private selectBox: BoxRenderable | undefined;
   private completionBox: BoxRenderable | undefined;
   private completionRows: TextRenderable[] = [];
@@ -328,6 +332,9 @@ export class TuiApp {
         },
       },
     });
+    // Selecting transcript text must not steal the editor's focus: the box
+    // still selects and scrolls, it just never becomes the focused renderable.
+    this.scrollbox.focusable = false;
     this.root.add(this.scrollbox);
 
     this.editorBox = new BoxRenderable(this.renderer, {
@@ -430,6 +437,10 @@ export class TuiApp {
     this.toolTicker = undefined;
     clearInterval(this.progressTicker);
     this.progressTicker = undefined;
+    clearTimeout(this.toastTimer);
+    this.toastTimer = undefined;
+    this.toastBox = undefined;
+    this.toastText = undefined;
     void this.clipboard?.dispose();
     this.clipboard = undefined;
     this.modal?.resolve("deny");
@@ -543,6 +554,11 @@ export class TuiApp {
     if (this.inputModal) {
       this.inputModal.box.backgroundColor = theme.background;
       this.inputModal.box.borderColor = theme.colors.accent;
+    }
+    if (this.toastBox && this.toastText) {
+      this.toastBox.backgroundColor = theme.colors.toolBg;
+      this.toastBox.borderColor = theme.colors[this.toastColor];
+      this.toastText.fg = theme.colors[this.toastColor];
     }
     if (this.completionItems.length > 0) this.renderCompletion();
     if (this.editorBox) {
@@ -726,6 +742,63 @@ export class TuiApp {
 
   notify(text: string, level: "info" | "warn" | "error" = "info"): void {
     this.appendBlock({ id: `notice-${Date.now()}-${this.order.length}`, kind: "notice", text, level });
+  }
+
+  /**
+   * Transient message floating over the transcript's bottom-right corner.
+   * Unlike `notify` it never enters the transcript or steals a line from it.
+   */
+  toast(text: string, level: "info" | "warn" | "error" = "info", duration = 2000): void {
+    if (!this.renderer || !this.root || this.stopped) {
+      this.notify(text, level);
+      return;
+    }
+    const token: ThemeToken =
+      level === "warn" ? "warning" : level === "error" ? "error" : "success";
+    this.toastColor = token;
+    const color = this.color(token);
+    if (!this.toastBox || !this.toastText) {
+      this.toastText = new TextRenderable(this.renderer, {
+        content: text,
+        fg: color,
+        wrapMode: "none",
+        truncate: true,
+        selectable: false,
+      });
+      this.toastBox = new BoxRenderable(this.renderer, {
+        id: "toast",
+        position: "absolute",
+        bottom: 8,
+        right: 2,
+        width: "auto",
+        maxWidth: "70%",
+        border: true,
+        borderStyle: "rounded",
+        borderColor: color,
+        backgroundColor: this.color("toolBg"),
+        paddingX: 1,
+        zIndex: 100,
+      });
+      this.toastBox.add(this.toastText);
+      this.root.add(this.toastBox);
+    } else {
+      this.toastText.content = text;
+      this.toastText.fg = color;
+      this.toastBox.borderColor = color;
+      this.toastBox.backgroundColor = this.color("toolBg");
+    }
+    clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => this.hideToast(), duration);
+    this.renderer.requestRender();
+  }
+
+  private hideToast(): void {
+    clearTimeout(this.toastTimer);
+    this.toastTimer = undefined;
+    this.toastBox?.destroyRecursively();
+    this.toastBox = undefined;
+    this.toastText = undefined;
+    this.renderer?.requestRender();
   }
 
   confirm(title: string, message: string): Promise<"allow" | "session" | "deny"> {
@@ -1917,7 +1990,7 @@ export class TuiApp {
     try {
       const result = await clipboard.writeText(text, { destination: "best-available" });
       if (result.host.status === "written" || result.terminal.status === "attempted") {
-        this.notify(`Copied ${text.length} chars`);
+        this.toast(`Copied ${text.length} chars`);
       } else {
         this.notify("Clipboard write failed", "warn");
       }
