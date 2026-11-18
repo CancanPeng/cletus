@@ -4,6 +4,7 @@ export type SubagentRequest = {
   description: string;
   prompt: string;
   signal?: AbortSignal;
+  onProgress?: (text: string) => void;
 };
 
 export function createTaskTool(deps: {
@@ -51,6 +52,7 @@ export function createTaskTool(deps: {
           description: String(params["description"] ?? ""),
           prompt: String(params["prompt"] ?? ""),
           signal: ctx.signal,
+          onProgress: (text) => ctx.onUpdate({ content: [{ type: "text", text }] }),
         });
       } finally {
         release();

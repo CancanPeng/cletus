@@ -1,6 +1,7 @@
 import { Agent, type AgentEvent, type AgentTool, type ToolResult } from "@cletus/agent";
 import type { Model, StreamFn, AssistantMessage, Usage } from "@cletus/ai";
 import { PermissionPolicy } from "./permissions/policy.js";
+import { createSubagentProgress } from "./subagent-progress.js";
 import type { SubagentRequest } from "./tools/task.js";
 
 export function createSubagentRunner(deps: {
@@ -50,7 +51,12 @@ export function createSubagentRunner(deps: {
     const texts: string[] = [];
     const usage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
     let turns = 0;
+    // Per-request state: concurrent tasks share this runner but must not
+    // mix progress streams.
+    const progress = createSubagentProgress(30);
     const unsubscribe = agent.subscribe((event: AgentEvent) => {
+      const progressText = progress.handle(event);
+      if (progressText !== undefined) req.onProgress?.(progressText);
       if (event.type === "turn_end") {
         turns += 1;
         const message = event.message;
