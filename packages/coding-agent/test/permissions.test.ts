@@ -209,4 +209,104 @@ describe("permission policy", () => {
     expect(summaries).toHaveLength(2);
     expect(summaries[1]).toContain("Authorization");
   });
+
+  const DENY_COPY =
+    "Denied: not covered by inherited grants or permissions rules (approve it in the main session, add a rule via /permissions add, or use --yolo)";
+
+  it("snapshot round-trips grants into a new policy", async () => {
+    const cwd = await temp();
+    const parent = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: ["src/**"],
+      yolo: false,
+      interactive: true,
+      confirm: async () => "allow",
+    });
+    parent.setExtraTools(["ext_tool"]);
+    expect((await parent.check("write", { path: "notes.txt", content: "x" })).allow).toBe(true);
+    expect((await parent.check("bash", { command: "pnpm test" })).allow).toBe(true);
+    expect((await parent.check("web_search", { query: "hello" })).allow).toBe(true);
+    expect((await parent.check("curl", { urls: ["https://example.com"] })).allow).toBe(true);
+    expect((await parent.check("mcp__srv__tool", {})).allow).toBe(true);
+    expect((await parent.check("ext_tool", {})).allow).toBe(true);
+
+    const child = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: false,
+      inherit: parent.snapshot(),
+    });
+    expect((await child.check("write", { path: "notes.txt", content: "x" })).allow).toBe(true);
+    expect((await child.check("bash", { command: "pnpm test" })).allow).toBe(true);
+    expect((await child.check("web_search", { query: "hello" })).allow).toBe(true);
+    expect((await child.check("curl", { urls: ["https://example.com"] })).allow).toBe(true);
+    expect((await child.check("mcp__srv__tool", {})).allow).toBe(true);
+    expect((await child.check("ext_tool", {})).allow).toBe(true);
+    expect((await child.check("write", { path: "src/a.ts", content: "x" })).allow).toBe(true);
+  });
+
+  it("snapshot is a copy, not a live reference", async () => {
+    const cwd = await temp();
+    const parent = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: true,
+      confirm: async () => "allow",
+    });
+    expect((await parent.check("bash", { command: "pnpm test" })).allow).toBe(true);
+    const child = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: false,
+      inherit: parent.snapshot(),
+    });
+    expect((await parent.check("bash", { command: "pnpm build" })).allow).toBe(true);
+    expect((await child.check("bash", { command: "pnpm build" })).allow).toBe(false);
+    expect((await child.check("bash", { command: "pnpm test" })).allow).toBe(true);
+  });
+
+  it("inherit never makes a child interactive", async () => {
+    const cwd = await temp();
+    const parent = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: true,
+      confirm: async () => "allow",
+    });
+    const child = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: false,
+      inherit: parent.snapshot(),
+    });
+    const denied = await child.check("write", { path: "ungranted.txt", content: "x" });
+    expect(denied.allow).toBe(false);
+    expect(denied.reason).toBe(DENY_COPY);
+  });
+
+  it("deny copy is actionable", async () => {
+    const cwd = await temp();
+    const policy = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: false,
+    });
+    const denied = await policy.check("bash", { command: "ls" });
+    expect(denied.allow).toBe(false);
+    expect(denied.reason).toContain("/permissions add");
+    expect(denied.reason).toContain("--yolo");
+  });
 });
