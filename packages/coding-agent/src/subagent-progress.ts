@@ -39,12 +39,29 @@ export function createSubagentProgress(maxTurns: number): {
   const lines: string[] = [];
   const starts = new Map<string, { name: string; args: string; at: number }>();
 
+  const MARKER = "[earlier activity dropped]";
+
   const render = (): string => {
-    const parts = [`▸ turn ${turn}/${maxTurns} · ${activity}`];
-    if (dropped) parts.push("[earlier activity dropped]");
-    parts.push(...lines);
-    const text = parts.join("\n");
-    return text.length > MAX_TEXT ? text.slice(-MAX_TEXT) : text;
+    const status = `▸ turn ${turn}/${maxTurns} · ${activity}`;
+    // Spend the char budget on whole log lines from the newest backwards:
+    // a blind tail-slice would eat the status line, the feature's whole point.
+    // Reserve room for the marker up front so flipping `dropped` mid-render
+    // can never push the total past MAX_TEXT.
+    const kept: string[] = [];
+    let used = status.length + 1 + MARKER.length;
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const line = lines[i]!;
+      if (used + 1 + line.length > MAX_TEXT) {
+        dropped = true;
+        break;
+      }
+      used += 1 + line.length;
+      kept.unshift(line);
+    }
+    const parts = [status];
+    if (dropped) parts.push(MARKER);
+    parts.push(...kept);
+    return parts.join("\n");
   };
 
   return {

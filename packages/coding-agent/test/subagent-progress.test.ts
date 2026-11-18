@@ -66,6 +66,22 @@ describe("subagent progress formatter", () => {
     expect(text.length).toBeLessThanOrEqual(16384);
   });
 
+  it("keeps the status line when long log lines exceed the char budget", () => {
+    const progress = createSubagentProgress(30);
+    progress.handle({ type: "turn_start", turn: 1 });
+    const longArgs = { command: "c".repeat(200) };
+    const longError = `FAIL ${"x".repeat(170)}`;
+    let text = "";
+    for (let i = 1; i <= 100; i += 1) {
+      progress.handle(start(`t${i}`, "bash", longArgs));
+      text = progress.handle(end(`t${i}`, "bash", longError, true)) ?? "";
+    }
+    expect(text.startsWith("▸ turn 1/30 · thinking …")).toBe(true);
+    expect(text).toContain("[earlier activity dropped]");
+    expect(text).toContain("✗ bash");
+    expect(text.length).toBeLessThanOrEqual(16384);
+  });
+
   it("returns undefined for unrelated events", () => {
     const progress = createSubagentProgress(30);
     expect(progress.handle({ type: "agent_start" })).toBeUndefined();
