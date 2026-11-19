@@ -133,6 +133,38 @@ describe("agent definitions", () => {
     expect(builtinAgents().map((a) => a.name).sort()).toEqual(["explore", "general-purpose"]);
   });
 
+  it("scalar tools field is parsed as a comma-separated list", async () => {
+    const cwd = await temp();
+    const home = await temp();
+    await writeAgent(
+      join(home, "agents"),
+      "scalar.md",
+      `---\ndescription: Scalar tools\ntools: read, grep\n---\nBody.\n`,
+    );
+    const { agents } = await loadAgents(cwd, home, false);
+    expect(agents.find((a) => a.name === "scalar")?.tools).toEqual(["read", "grep"]);
+  });
+
+  it("empty or fully-invalid tools whitelist skips the agent with a warning", async () => {
+    const cwd = await temp();
+    const home = await temp();
+    await writeAgent(
+      join(home, "agents"),
+      "empty.md",
+      `---\ndescription: Empty tools\ntools: []\n---\nBody.\n`,
+    );
+    await writeAgent(
+      join(home, "agents"),
+      "allbad.md",
+      `---\ndescription: All bad\ntools: [frobnicate]\n---\nBody.\n`,
+    );
+    const { agents, warnings } = await loadAgents(cwd, home, false);
+    expect(agents.find((a) => a.name === "empty")).toBeUndefined();
+    expect(agents.find((a) => a.name === "allbad")).toBeUndefined();
+    expect(warnings.some((w) => w.includes("empty"))).toBe(true);
+    expect(warnings.some((w) => w.includes("allbad"))).toBe(true);
+  });
+
   it("bad YAML frontmatter is skipped without throwing", async () => {
     const cwd = await temp();
     const home = await temp();

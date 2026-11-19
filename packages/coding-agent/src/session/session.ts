@@ -93,6 +93,9 @@ export class AgentSession {
     const session = new AgentSession(options, manager);
     session.resources = await options.resources.load();
     options.permissions.setReadOnlyRoots(session.resources.readOnlyRoots);
+    for (const warning of session.resources.agentWarnings) {
+      options.onNotice?.(warning, "warn");
+    }
     const projection = buildProjection(manager);
     let model = options.model;
     const branch = manager.getBranch();
@@ -165,6 +168,7 @@ export class AgentSession {
           tools,
           contextFiles: def.omitContext ? [] : this.resources.contextFiles,
           skills: def.omitContext ? [] : this.resources.skills,
+          persona: def.prompt,
         }),
       getApiKey: (model) => resolveApiKey(this.options.config, this.options.auth, model),
       agents,
@@ -453,6 +457,9 @@ export class AgentSession {
     await this.options.mcp?.reload();
     this.resources = await this.options.resources.load();
     this.options.permissions.setReadOnlyRoots(this.resources.readOnlyRoots);
+    for (const warning of this.resources.agentWarnings) {
+      this.options.onNotice?.(warning, "warn");
+    }
     this.refreshTools();
   }
 

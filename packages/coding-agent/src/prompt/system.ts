@@ -6,11 +6,14 @@ export type SystemPromptInput = {
   tools: AgentTool[];
   contextFiles: ContextFile[];
   skills: Skill[];
+  /** Replaces the default persona line (subagent role definitions). */
+  persona?: string;
 };
 
 export function buildSystemPrompt(input: SystemPromptInput): string {
   const sections: string[] = [
-    "You are cletus, a coding agent running in the user's terminal. Inspect files, run commands, and modify code to complete the user's task.",
+    input.persona ??
+      "You are cletus, a coding agent running in the user's terminal. Inspect files, run commands, and modify code to complete the user's task.",
   ];
 
   const toolLines = input.tools.map((tool) => {

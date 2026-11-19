@@ -109,13 +109,25 @@ export async function loadAgents(
         continue;
       }
       const def: AgentDefinition = { name, description, prompt: body.trim(), source, path: real };
-      if (Array.isArray(meta["tools"])) {
+      // tools may be a YAML list or a comma/space-separated string. A declared
+      // whitelist that ends up empty means the agent could do nothing: skip
+      // the file instead of shipping a useless (or fail-open) agent.
+      const rawTools = meta["tools"];
+      const declared = Array.isArray(rawTools)
+        ? rawTools.map(String)
+        : typeof rawTools === "string"
+          ? rawTools.split(/[,\s]+/).filter(Boolean)
+          : undefined;
+      if (declared !== undefined) {
         const tools: string[] = [];
-        for (const raw of meta["tools"]) {
-          const tool = String(raw);
+        for (const tool of declared) {
           if (tool === "task") continue; // recursion guard, always excluded
           if (CORE_TOOL_NAMES.includes(tool)) tools.push(tool);
           else warnings.push(`Agent ${name}: unknown tool "${tool}" ignored`);
+        }
+        if (tools.length === 0) {
+          warnings.push(`Agent definition skipped (empty tools whitelist): ${path}`);
+          continue;
         }
         def.tools = tools;
       }

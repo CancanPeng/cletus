@@ -19,7 +19,11 @@ export function createSubagentRunner(deps: {
   return async (req: SubagentRequest): Promise<ToolResult> => {
     const agents = deps.agents ?? builtinAgents();
     const typeName = req.subagentType ?? "general-purpose";
-    const def = agents.find((a) => a.name === typeName);
+    // A shadowing definition may have been filtered out (bad model ref);
+    // the builtin of the same name keeps untyped delegation working.
+    const def =
+      agents.find((a) => a.name === typeName) ??
+      builtinAgents().find((a) => a.name === typeName);
     if (!def) {
       return {
         isError: true,
@@ -61,7 +65,7 @@ export function createSubagentRunner(deps: {
     });
     const allTools = deps.createTools(deps.cwd, { excludeTask: true, policy });
     const tools = def.tools ? allTools.filter((tool) => def.tools!.includes(tool.name)) : allTools;
-    const systemPrompt = `${deps.buildSystemPrompt(tools, def)}\n\n<agent_role>\n${def.prompt}\n</agent_role>\n\n<subagent>\nYou are a subagent. Work independently, do not ask questions, and finish with a concise report of findings and changes.\n</subagent>`;
+    const systemPrompt = `${deps.buildSystemPrompt(tools, def)}\n\n<subagent>\nYou are a subagent. Work independently, do not ask questions, and finish with a concise report of findings and changes.\n</subagent>`;
     const agent = new Agent({
       model: childModel,
       streamFn: deps.streamFn,

@@ -658,6 +658,42 @@ describe("subagent", () => {
     expect(seen.find((s) => s.prompt === "task-b")?.modelId).toBe("fake");
   });
 
+  it("falls back to the builtin when a shadowing definition is missing", async () => {
+    const record = { models: [] as string[], contexts: [] as LlmContext[] };
+    // Session filtered out a broken custom general-purpose; list has only explore.
+    const run = createSubagentRunner({
+      cwd: process.cwd(),
+      model,
+      streamFn: recordingStream(record),
+      policy: typingPolicy(),
+      createTools: allTools,
+      buildSystemPrompt: () => "parent prompt",
+      agents: [builtinAgents()[0]!],
+      resolveModel: () => modelB,
+    });
+    const result = await run({ description: "t", prompt: "p" });
+    expect(result.isError).not.toBe(true);
+    expect(record.models).toEqual(["fake"]);
+  });
+
+  it("agent role replaces the persona instead of appending", async () => {
+    const record = { models: [] as string[], contexts: [] as LlmContext[] };
+    const run = createSubagentRunner({
+      cwd: process.cwd(),
+      model,
+      streamFn: recordingStream(record),
+      policy: typingPolicy(),
+      createTools: allTools,
+      buildSystemPrompt: (tools, def) => `PERSONA:${def.prompt} TOOLS:${tools.length}`,
+      agents: builtinAgents(),
+      resolveModel: () => modelB,
+    });
+    await run({ description: "t", prompt: "p", subagentType: "explore" });
+    const prompt = record.contexts[0]?.systemPrompt ?? "";
+    expect(prompt).toContain("PERSONA:You are a read-only exploration agent.");
+    expect(prompt).not.toContain("<agent_role>");
+  });
+
   it("task tool description lists agents and schema accepts subagent_type", async () => {
     let received: string | undefined;
     const tool = createTaskTool({
