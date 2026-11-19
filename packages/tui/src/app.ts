@@ -18,6 +18,7 @@ import {
   type CliRenderer,
   type KeyEvent,
 } from "@opentui/core";
+import { spawn } from "node:child_process";
 import type { ImageAttachment } from "@cletus/ai";
 import type { KeybindingsManager } from "./keybindings.js";
 import type { SymbolKey, Theme, ThemeToken } from "./theme.js";
@@ -38,6 +39,8 @@ export type ManagedListTab = {
   items: ManagedItem[];
   onCycle: (id: string, state: string) => Promise<void> | void;
   refresh?: () => Promise<ManagedItem[]>;
+  /** Enter action: fires after the popup closes. Without it Enter just closes. */
+  onOpen?: (item: ManagedItem) => void;
 };
 
 export type ManagedSearchTab = {
@@ -643,6 +646,31 @@ export class TuiApp {
     };
     this.renderManager();
     return state.promise;
+  }
+
+  /**
+   * Hand the terminal to an external editor: suspend the renderer, run the
+   * command with the file path appended, and always resume — even when the
+   * editor crashes — so the TUI can never be left suspended.
+   */
+  async editFile(path: string, editorCommand: string): Promise<void> {
+    if (!this.renderer) return;
+    await this.renderer.suspend();
+    try {
+      const code = await new Promise<number | null>((resolve, reject) => {
+        const child = spawn(editorCommand, [path], { stdio: "inherit", shell: true });
+        child.on("error", reject);
+        child.on("close", resolve);
+      });
+      if (code !== 0) this.notify(`Editor exited with code ${code}`, "warn");
+    } catch (error) {
+      this.notify(
+        `Editor failed: ${error instanceof Error ? error.message : String(error)}`,
+        "warn",
+      );
+    } finally {
+      await this.renderer.resume();
+    }
   }
 
   promptInput(title: string, placeholder: string): Promise<string | undefined> {
@@ -1584,7 +1612,9 @@ export class TuiApp {
     }
     this.intercept(key);
     if (key.name === "return") {
+      const item = this.visibleManagerItems()[manager.index];
       this.closeManager();
+      if (item && tab.onOpen) tab.onOpen(item);
       return;
     }
     if (key.name === "escape") {
