@@ -26,6 +26,7 @@ function config(): CletusConfig {
     maxAutoContinues: 3,
     webSearch: { enabled: false, order: [], timeoutSeconds: 30 },
     skillOverrides: {},
+    agentOverrides: {},
     permissions: { allowWrite: [] },
     tui: {
       showThinking: false,
