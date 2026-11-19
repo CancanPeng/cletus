@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { SkillVisibility } from "../config.js";
+import { loadAgents, type AgentDefinition } from "./agents.js";
 import { loadContextFiles, type ContextFile } from "./context-files.js";
 import { loadPrompts, type PromptTemplate } from "./prompts.js";
 import { loadSkills, setSkillModelInvocation, type Skill } from "./skills.js";
@@ -9,6 +10,8 @@ export type LoadedResources = {
   prompts: PromptTemplate[];
   contextFiles: ContextFile[];
   readOnlyRoots: string[];
+  agents: AgentDefinition[];
+  agentWarnings: string[];
 };
 
 export class ResourceLoader {
@@ -25,10 +28,11 @@ export class ResourceLoader {
     // Scanning skill roots walks the filesystem; reuse the last result until
     // reload()/setSkillOverrides() invalidates it (every LLM turn calls load).
     if (this.loaded) return this.loaded;
-    const [contextFiles, skillResult, prompts] = await Promise.all([
+    const [contextFiles, skillResult, prompts, agentResult] = await Promise.all([
       loadContextFiles(this.cwd, this.home),
       loadSkills(this.cwd, this.home, this.skillOverrides, this.trustProject),
       loadPrompts(this.cwd, this.home, this.trustProject),
+      loadAgents(this.cwd, this.home, this.trustProject),
     ]);
     const roots = [
       join(this.home, "skills"),
@@ -43,6 +47,8 @@ export class ResourceLoader {
       prompts,
       contextFiles,
       readOnlyRoots: [...new Set(roots)],
+      agents: agentResult.agents,
+      agentWarnings: agentResult.warnings,
     };
     this.loaded = result;
     return result;
@@ -71,4 +77,5 @@ export class ResourceLoader {
   }
 }
 
-export type { ContextFile, PromptTemplate, Skill };
+export type { AgentDefinition, ContextFile, PromptTemplate, Skill };
+export { builtinAgents, CORE_TOOL_NAMES, loadAgents } from "./agents.js";

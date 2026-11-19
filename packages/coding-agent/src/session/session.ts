@@ -83,6 +83,8 @@ export class AgentSession {
       prompts: [],
       contextFiles: [],
       readOnlyRoots: [],
+      agents: [],
+      agentWarnings: [],
     };
   }
 

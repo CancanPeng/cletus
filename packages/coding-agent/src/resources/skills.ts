@@ -21,7 +21,7 @@ export type Skill = {
   source: SkillSource;
 };
 
-function parseFrontmatter(text: string): { meta: Record<string, unknown>; body: string } {
+export function parseFrontmatter(text: string): { meta: Record<string, unknown>; body: string } {
   const source = text.startsWith("\ufeff") ? text.slice(1) : text;
   // The closing delimiter must be a full line, not a prefix of ---- or ---foo.
   const match = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(source);
