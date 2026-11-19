@@ -143,19 +143,21 @@ export class AgentSession {
     if (excludeTask) return core;
     // Agents with unresolvable model refs are dropped from the delegation
     // list (with a warning) so one bad definition cannot break the tool.
-    const agents = this.resources.agents.filter((def) => {
-      if (!def.model) return true;
-      try {
-        resolveModel(this.options.config, this.options.auth, def.model);
-        return true;
-      } catch {
-        this.options.onNotice?.(
-          `Agent ${def.name} disabled: unknown model "${def.model}"`,
-          "warn",
-        );
-        return false;
-      }
-    });
+    const agents = this.resources.agents
+      .filter((def) => this.options.config.agentOverrides[def.name] !== "off")
+      .filter((def) => {
+        if (!def.model) return true;
+        try {
+          resolveModel(this.options.config, this.options.auth, def.model);
+          return true;
+        } catch {
+          this.options.onNotice?.(
+            `Agent ${def.name} disabled: unknown model "${def.model}"`,
+            "warn",
+          );
+          return false;
+        }
+      });
     const subagent = createSubagentRunner({
       cwd,
       model: this.model,

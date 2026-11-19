@@ -36,6 +36,7 @@ export type CletusConfig = {
   maxAutoContinues: number;
   webSearch: WebSearchConfig;
   skillOverrides: Record<string, SkillVisibility>;
+  agentOverrides: Record<string, "on" | "off">;
   permissions: { allowWrite: string[] };
   tui: {
     showThinking: boolean;
@@ -81,6 +82,7 @@ export function createDefaultConfig(): CletusConfig {
       timeoutSeconds: 30,
     },
     skillOverrides: {},
+    agentOverrides: {},
     permissions: { allowWrite: [] },
     tui: {
       showThinking: true,
@@ -142,6 +144,7 @@ export async function loadConfig(home = cletusHome(), path = configPath(home)): 
       compaction: { ...createDefaultConfig().compaction, ...parsed.compaction },
       webSearch: { ...createDefaultConfig().webSearch, ...parsed.webSearch },
       skillOverrides: { ...createDefaultConfig().skillOverrides, ...parsed.skillOverrides },
+      agentOverrides: { ...createDefaultConfig().agentOverrides, ...parsed.agentOverrides },
       permissions: { ...createDefaultConfig().permissions, ...parsed.permissions },
       tui: {
         ...createDefaultConfig().tui,

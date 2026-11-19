@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { resolveModel, type CletusConfig } from "../src/config.js";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createDefaultConfig, loadConfig, resolveModel, type CletusConfig } from "../src/config.js";
 
 function config(): CletusConfig {
   return {
@@ -70,5 +73,17 @@ describe("resolveModel", () => {
     expect(
       resolveModel(cfg, { keys: {} }, "aliyun-token-plan/deepseek-v4.1-flash-1017").supportsImages,
     ).toBeUndefined();
+  });
+
+  it("agentOverrides defaults and merges", async () => {
+    expect(createDefaultConfig().agentOverrides).toEqual({});
+    const home = await mkdtemp(join(tmpdir(), "cletus-cfg-"));
+    await writeFile(
+      join(home, "config.json"),
+      JSON.stringify({ agentOverrides: { explore: "off" } }),
+      "utf8",
+    );
+    const cfg = await loadConfig(home);
+    expect(cfg.agentOverrides).toEqual({ explore: "off" });
   });
 });

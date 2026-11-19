@@ -291,4 +291,40 @@ describe("image attachments", () => {
     ]);
     await session.dispose();
   });
+
+  it("off agents are excluded from delegation", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    const manager = await SessionManager.create(cwd, { home });
+    const model: Model = {
+      provider: "openai",
+      id: "fake",
+      baseUrl: "http://localhost",
+      contextWindow: 100000,
+      maxOutputTokens: 1000,
+    };
+    const config = createDefaultConfig();
+    config.agentOverrides = { explore: "off" };
+    const session = await AgentSession.create({
+      cwd,
+      home,
+      config,
+      auth: { keys: {} },
+      model,
+      sessionManager: manager,
+      permissions: new PermissionPolicy({
+        cwd,
+        readOnlyRoots: [],
+        allowWrite: [],
+        yolo: true,
+        interactive: false,
+      }),
+      resources: new ResourceLoader(cwd, home),
+    });
+    const task = session.agent.state.tools.find((tool) => tool.name === "task");
+    expect(task).toBeDefined();
+    expect(task?.description).not.toContain("- explore:");
+    expect(task?.description).toContain("- general-purpose:");
+    await session.dispose();
+  });
 });
