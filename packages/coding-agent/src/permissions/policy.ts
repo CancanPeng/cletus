@@ -44,6 +44,7 @@ export class PermissionPolicy {
   private yoloMode: boolean;
   private readonly interactive: boolean;
   private readonly confirm: ConfirmFn | undefined;
+  private readonly readOnly: boolean;
   private readonly sessionPaths = new Set<string>();
   private readonly sessionCommands = new Set<string>();
   private readonly sessionMcpTools = new Set<string>();
@@ -65,8 +66,11 @@ export class PermissionPolicy {
      * Callers inheriting should omit those opts to avoid dead arguments.
      */
     inherit?: PermissionSnapshot;
+    /** Child-side constraint (not a grant): deny write/edit/bash outright. */
+    readOnly?: boolean;
   }) {
     const inherited = opts.inherit;
+    this.readOnly = opts.readOnly === true;
     this.sandbox = {
       cwd: opts.cwd,
       readOnlyRoots: inherited ? [...inherited.readOnlyRoots] : opts.readOnlyRoots,
@@ -190,6 +194,7 @@ export class PermissionPolicy {
     }
 
     if (toolName === "write" || toolName === "edit") {
+      if (this.readOnly) return { allow: false, reason: "Denied: agent is read-only" };
       const input = typeof args["path"] === "string" ? args["path"] : "";
       let resolved: string;
       try {
@@ -265,6 +270,7 @@ export class PermissionPolicy {
     }
 
     if (toolName === "bash") {
+      if (this.readOnly) return { allow: false, reason: "Denied: agent is read-only" };
       if (this.yolo) return { allow: true };
       const command = String(args["command"] ?? "");
       if (this.sessionCommands.has(command)) return { allow: true };

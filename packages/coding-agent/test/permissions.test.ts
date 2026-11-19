@@ -311,6 +311,39 @@ describe("permission policy", () => {
     expect(denied.reason).toContain("--yolo");
   });
 
+  it("readOnly denies writes even with yolo and grants", async () => {
+    const cwd = await temp();
+    await writeFile(join(cwd, "a.txt"), "ok");
+    const policy = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: ["**"],
+      yolo: true,
+      interactive: false,
+      readOnly: true,
+    });
+    for (const [tool, args] of [
+      ["write", { path: "a.txt", content: "x" }],
+      ["edit", { path: "a.txt", edits: [] }],
+      ["bash", { command: "ls" }],
+    ] as const) {
+      const denied = await policy.check(tool, args as Record<string, unknown>);
+      expect(denied.allow).toBe(false);
+      expect(denied.reason).toBe("Denied: agent is read-only");
+    }
+    expect((await policy.check("read", { path: "a.txt" })).allow).toBe(true);
+    // readOnly is a child-side constraint, not a grant: it must not propagate.
+    const child = new PermissionPolicy({
+      cwd,
+      readOnlyRoots: [],
+      allowWrite: [],
+      yolo: false,
+      interactive: false,
+      inherit: policy.snapshot(),
+    });
+    expect((await child.check("write", { path: "a.txt", content: "x" })).allow).toBe(true);
+  });
+
   it("inherit is authoritative over constructor opts", async () => {
     const cwd = await temp();
     const parent = new PermissionPolicy({

@@ -82,6 +82,12 @@ describe("subagent progress formatter", () => {
     expect(text.length).toBeLessThanOrEqual(16384);
   });
 
+  it("prefixes the status line with the agent label", () => {
+    const progress = createSubagentProgress(30, "explore");
+    const text = progress.handle({ type: "turn_start", turn: 1 });
+    expect(text?.split("\n")[0]?.startsWith("▸ explore turn 1/30 · ")).toBe(true);
+  });
+
   it("returns undefined for unrelated events", () => {
     const progress = createSubagentProgress(30);
     expect(progress.handle({ type: "agent_start" })).toBeUndefined();

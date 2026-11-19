@@ -29,7 +29,7 @@ function firstLine(result: ToolResult): string {
  * the first line is the current activity, the rest is a capped tool log.
  * One instance per subagent run — concurrent tasks must not share state.
  */
-export function createSubagentProgress(maxTurns: number): {
+export function createSubagentProgress(maxTurns: number, label = ""): {
   /** Returns the full progress text when the display should change, else undefined. */
   handle(event: AgentEvent): string | undefined;
 } {
@@ -42,7 +42,7 @@ export function createSubagentProgress(maxTurns: number): {
   const MARKER = "[earlier activity dropped]";
 
   const render = (): string => {
-    const status = `▸ turn ${turn}/${maxTurns} · ${activity}`;
+    const status = `▸ ${label ? `${label} ` : ""}turn ${turn}/${maxTurns} · ${activity}`;
     // Spend the char budget on whole log lines from the newest backwards:
     // a blind tail-slice would eat the status line, the feature's whole point.
     // Reserve room for the marker up front so flipping `dropped` mid-render
