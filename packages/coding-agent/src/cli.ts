@@ -1,8 +1,8 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning --experimental-ffi
-import { access, readFile, mkdir } from "node:fs/promises";
+import { access, readFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { parseArgs } from "node:util";
 import type { AgentEvent, AgentMessage } from "@cletus/agent";
@@ -22,7 +22,8 @@ import {
   type SkillVisibility,
 } from "./config.js";
 import { importPi } from "./config/import-pi.js";
-import { ResourceLoader, type LoadedResources } from "./resources/index.js";
+import { ResourceLoader, type AgentDefinition, type LoadedResources } from "./resources/index.js";
+import { agentTemplate, resolveEditorCommand, validateAgentName } from "./agents-manager.js";
 import { installRegistrySkill, searchSkillRegistry, type RegistrySkill } from "./resources/skills-registry.js";
 import { ExtensionHost } from "./extensions/host.js";
 import { McpManager } from "./mcp/manager.js";
@@ -56,6 +57,7 @@ const BUILTIN_COMMANDS = [
   "symbols",
   "keys",
   "skills",
+  "agents",
   "permissions",
   "yolo",
   "mcp",
@@ -775,6 +777,118 @@ async function runTui(opts: {
         await opts.resources.load();
         syncSkillCommands();
         if (changed) app?.notify("Skills saved");
+      },
+    },
+    {
+      name: "agents",
+      description: "Manage subagent definitions",
+      run: async () => {
+        if (!session) return;
+        if (session.agent.state.isStreaming) {
+          app?.notify("Cannot manage agents while running", "warn");
+          return;
+        }
+        const agentsDir = join(opts.home, "agents");
+        const toItems = (agents: AgentDefinition[]): ManagedItem[] =>
+          agents.map((def) => ({
+            id: def.name,
+            label: `${def.name} · ${def.source}${def.model ? ` · ${def.model}` : ""}${def.tools ? ` · ${def.tools.length} tools` : ""} — ${def.description}`,
+            state: opts.config.agentOverrides[def.name] ?? "on",
+            states: ["on", "off"],
+          }));
+        const loadItems = async (): Promise<ManagedItem[]> => {
+          opts.resources.reload();
+          return toItems((await opts.resources.load()).agents);
+        };
+        const reloadAgents = async (): Promise<void> => {
+          opts.resources.reload();
+          await opts.resources.load();
+          session?.refreshTools();
+          app?.notify("Agents reloaded");
+        };
+        const editPath = async (path: string): Promise<void> => {
+          const editor = resolveEditorCommand(process.env, (cmd) => {
+            try {
+              execFileSync("which", [cmd], { stdio: "ignore" });
+              return true;
+            } catch {
+              return false;
+            }
+          });
+          if (!editor || !app) {
+            app?.notify(`No editor found. Edit manually: ${path}`, "warn");
+            return;
+          }
+          await app.editFile(path, editor);
+          await reloadAgents();
+        };
+        const openAgent = async (id: string): Promise<void> => {
+          const def = (await opts.resources.load()).agents.find((a) => a.name === id);
+          if (!def) return;
+          if (def.path) {
+            await editPath(def.path);
+            return;
+          }
+          // Builtin: create a same-name override in the user dir (never
+          // clobber an existing file — edit that instead).
+          const path = join(agentsDir, `${def.name}.md`);
+          try {
+            await access(path);
+          } catch {
+            await mkdir(agentsDir, { recursive: true });
+            await writeFile(path, agentTemplate(def), "utf8");
+          }
+          await editPath(path);
+        };
+        const createAgent = async (value: string): Promise<void> => {
+          const name = value.trim();
+          if (!validateAgentName(name)) {
+            app?.notify("Agent names may only contain letters, digits, - and _", "warn");
+            return;
+          }
+          const existing = (await opts.resources.load()).agents.find((a) => a.name === name);
+          if (existing) {
+            app?.notify(`${name} already exists — edit it from the list`, "warn");
+            return;
+          }
+          await mkdir(agentsDir, { recursive: true });
+          const path = join(agentsDir, `${name}.md`);
+          await writeFile(path, agentTemplate({ name }), "utf8");
+          await editPath(path);
+        };
+        try {
+          await app?.manageTabs("Agents", [
+            {
+              kind: "list",
+              id: "agents",
+              title: "Agents",
+              items: toItems((await opts.resources.load()).agents),
+              refresh: loadItems,
+              onCycle: async (name, state) => {
+                opts.config.agentOverrides[name] = state === "off" ? "off" : "on";
+                await writeJsonAtomic(configPath(opts.home), opts.config);
+                session?.refreshTools();
+              },
+              onOpen: (item) => {
+                void openAgent(item.id).catch((error: unknown) => {
+                  app?.notify(error instanceof Error ? error.message : String(error), "error");
+                });
+              },
+            },
+            {
+              kind: "prompt",
+              id: "new",
+              title: "New",
+              placeholder: "agent name (letters, digits, - _)",
+              onSubmit: createAgent,
+            },
+          ]);
+        } catch (error) {
+          app?.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        opts.resources.reload();
+        await opts.resources.load();
+        session?.refreshTools();
       },
     },
     {
