@@ -1,15 +1,18 @@
 import type { AgentTool, ToolResult } from "@cletus/agent";
+import type { AgentDefinition } from "../resources/agents.js";
 
 export type SubagentRequest = {
   description: string;
   prompt: string;
   signal?: AbortSignal;
   onProgress?: (text: string) => void;
+  subagentType?: string;
 };
 
 export function createTaskTool(deps: {
   spawnSubagent: (req: SubagentRequest) => Promise<ToolResult>;
   maxConcurrent?: number;
+  agents?: AgentDefinition[];
 }): AgentTool {
   const maxConcurrent = deps.maxConcurrent ?? 4;
   let active = 0;
@@ -32,15 +35,27 @@ export function createTaskTool(deps: {
     else active -= 1;
   };
 
+  const agents = deps.agents ?? [];
+  const description =
+    agents.length > 0
+      ? `Delegate an independent read/write coding task to a subagent.\nAvailable subagent types:\n${agents
+          .map((a) => `- ${a.name}: ${a.description}`)
+          .join("\n")}`
+      : "Delegate an independent read/write coding task to a subagent.";
+
   return {
     name: "task",
     snippet: "Run a subagent for an independent subtask",
-    description: "Delegate an independent read/write coding task to a subagent.",
+    description,
     parameters: {
       type: "object",
       properties: {
         description: { type: "string" },
         prompt: { type: "string" },
+        subagent_type: {
+          type: "string",
+          description: "Optional agent type; omit for general-purpose",
+        },
       },
       required: ["description", "prompt"],
       additionalProperties: false,
@@ -48,11 +63,13 @@ export function createTaskTool(deps: {
     async execute(params, ctx): Promise<ToolResult> {
       await acquire(ctx.onUpdate);
       try {
+        const type = params["subagent_type"];
         return await deps.spawnSubagent({
           description: String(params["description"] ?? ""),
           prompt: String(params["prompt"] ?? ""),
           signal: ctx.signal,
           onProgress: (text) => ctx.onUpdate({ content: [{ type: "text", text }] }),
+          ...(typeof type === "string" && type ? { subagentType: type } : {}),
         });
       } finally {
         release();

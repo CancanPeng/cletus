@@ -138,24 +138,41 @@ export class AgentSession {
       webSearch: this.options.config.webSearch,
     });
     if (excludeTask) return core;
+    // Agents with unresolvable model refs are dropped from the delegation
+    // list (with a warning) so one bad definition cannot break the tool.
+    const agents = this.resources.agents.filter((def) => {
+      if (!def.model) return true;
+      try {
+        resolveModel(this.options.config, this.options.auth, def.model);
+        return true;
+      } catch {
+        this.options.onNotice?.(
+          `Agent ${def.name} disabled: unknown model "${def.model}"`,
+          "warn",
+        );
+        return false;
+      }
+    });
     const subagent = createSubagentRunner({
       cwd,
       model: this.model,
       streamFn: this.streamFn,
       policy,
       createTools: (childCwd, extra) => this.toolsFor(childCwd, extra.excludeTask, extra.policy),
-      buildSystemPrompt: (tools) =>
+      buildSystemPrompt: (tools, def) =>
         buildSystemPrompt({
           cwd,
           tools,
-          contextFiles: this.resources.contextFiles,
-          skills: this.resources.skills,
+          contextFiles: def.omitContext ? [] : this.resources.contextFiles,
+          skills: def.omitContext ? [] : this.resources.skills,
         }),
       getApiKey: (model) => resolveApiKey(this.options.config, this.options.auth, model),
+      agents,
+      resolveModel: (ref) => resolveModel(this.options.config, this.options.auth, ref),
     });
     return [
       ...core,
-      createTaskTool({ spawnSubagent: (req: SubagentRequest) => subagent(req) }),
+      createTaskTool({ spawnSubagent: (req: SubagentRequest) => subagent(req), agents }),
     ];
   }
 
