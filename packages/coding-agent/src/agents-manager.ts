@@ -1,3 +1,5 @@
+import { stringify as stringifyYaml } from "yaml";
+
 /** Pure helpers for the /agents manager popup (cli.ts wires the TUI). */
 
 export function validateAgentName(name: string): boolean {
@@ -15,16 +17,18 @@ export function agentTemplate(def: {
   model?: string;
   prompt?: string;
 }): string {
-  const lines = [
-    "---",
-    `name: ${def.name}`,
-    `description: ${def.description ?? "TODO: describe when to delegate to this agent"}`,
-  ];
-  if (def.tools) lines.push(`tools: [${def.tools.join(", ")}]`);
-  if (def.model) lines.push(`model: ${def.model}`);
-  lines.push("---");
+  // YAML-serialize the meta: descriptions contain ": " (TODO placeholder,
+  // builtin explore), which is invalid as a plain scalar and would make the
+  // loader silently skip the file.
+  const meta: Record<string, unknown> = {
+    name: def.name,
+    description: def.description ?? "TODO: describe when to delegate to this agent",
+  };
+  if (def.tools) meta["tools"] = def.tools;
+  if (def.model) meta["model"] = def.model;
+  const header = stringifyYaml(meta).trimEnd();
   const body = def.prompt ?? `You are the ${def.name} agent. TODO: define this role.`;
-  return `${lines.join("\n")}\n${body}\n`;
+  return `---\n${header}\n---\n${body}\n`;
 }
 
 /** $EDITOR → $VISUAL → first installed of nvim/vim/vi/nano; undefined = none. */

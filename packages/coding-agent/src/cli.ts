@@ -801,9 +801,7 @@ async function runTui(opts: {
           return toItems((await opts.resources.load()).agents);
         };
         const reloadAgents = async (): Promise<void> => {
-          opts.resources.reload();
-          await opts.resources.load();
-          session?.refreshTools();
+          await session?.reloadAgents();
           app?.notify("Agents reloaded");
         };
         const editPath = async (path: string): Promise<void> => {
@@ -831,6 +829,9 @@ async function runTui(opts: {
           }
           // Builtin: create a same-name override in the user dir (never
           // clobber an existing file — edit that instead).
+          app?.notify(
+            `Built-in agents cannot be edited directly — creating an override at ~/.cletus/agents/${def.name}.md`,
+          );
           const path = join(agentsDir, `${def.name}.md`);
           try {
             await access(path);
@@ -853,6 +854,15 @@ async function runTui(opts: {
           }
           await mkdir(agentsDir, { recursive: true });
           const path = join(agentsDir, `${name}.md`);
+          // A skipped/misnamed file may not be in the loaded list; never
+          // clobber an existing file on disk either.
+          try {
+            await access(path);
+            app?.notify(`${path} already exists — edit it from the list`, "warn");
+            return;
+          } catch {
+            // not present: create below
+          }
           await writeFile(path, agentTemplate({ name }), "utf8");
           await editPath(path);
         };
@@ -880,15 +890,14 @@ async function runTui(opts: {
               id: "new",
               title: "New",
               placeholder: "agent name (letters, digits, - _)",
+              closeOnSubmit: true,
               onSubmit: createAgent,
             },
           ]);
         } catch (error) {
           app?.notify(error instanceof Error ? error.message : String(error), "error");
         }
-        opts.resources.reload();
-        await opts.resources.load();
-        session?.refreshTools();
+        await session?.reloadAgents();
       },
     },
     {

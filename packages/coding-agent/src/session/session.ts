@@ -452,6 +452,22 @@ export class AgentSession {
     this.agent.setModel(model);
   }
 
+  /**
+   * Adopt reloaded resource files (agents/skills/prompts) without touching
+   * extensions/MCP. The session holds a private snapshot, so a loader-side
+   * reload alone never reaches the tools — this bridges it.
+   */
+  async reloadAgents(): Promise<void> {
+    if (this.agent.state.isStreaming) throw new Error("Cannot reload while running");
+    this.options.resources.reload();
+    this.resources = await this.options.resources.load();
+    this.options.permissions.setReadOnlyRoots(this.resources.readOnlyRoots);
+    for (const warning of this.resources.agentWarnings) {
+      this.options.onNotice?.(warning, "warn");
+    }
+    this.refreshTools();
+  }
+
   async reload(): Promise<void> {
     if (this.agent.state.isStreaming) throw new Error("Cannot reload while running");
     this.options.resources.reload();

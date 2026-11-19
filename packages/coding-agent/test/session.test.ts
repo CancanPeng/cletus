@@ -327,4 +327,46 @@ describe("image attachments", () => {
     expect(task?.description).toContain("- general-purpose:");
     await session.dispose();
   });
+
+  it("reloadAgents adopts new definition files into the task tool", async () => {
+    const home = await temp();
+    const cwd = await temp();
+    const manager = await SessionManager.create(cwd, { home });
+    const model: Model = {
+      provider: "openai",
+      id: "fake",
+      baseUrl: "http://localhost",
+      contextWindow: 100000,
+      maxOutputTokens: 1000,
+    };
+    const session = await AgentSession.create({
+      cwd,
+      home,
+      config: createDefaultConfig(),
+      auth: { keys: {} },
+      model,
+      sessionManager: manager,
+      permissions: new PermissionPolicy({
+        cwd,
+        readOnlyRoots: [],
+        allowWrite: [],
+        yolo: true,
+        interactive: false,
+      }),
+      resources: new ResourceLoader(cwd, home),
+    });
+    const before = session.agent.state.tools.find((tool) => tool.name === "task");
+    expect(before?.description).not.toContain("- latecomer:");
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(join(home, "agents"), { recursive: true });
+    await writeFile(
+      join(home, "agents", "latecomer.md"),
+      `---\ndescription: Added after session start\n---\nLate role.\n`,
+      "utf8",
+    );
+    await session.reloadAgents();
+    const after = session.agent.state.tools.find((tool) => tool.name === "task");
+    expect(after?.description).toContain("- latecomer:");
+    await session.dispose();
+  });
 });

@@ -58,6 +58,8 @@ export type ManagedPromptTab = {
   title: string;
   placeholder: string;
   onSubmit: (value: string) => Promise<void> | void;
+  /** Close the popup before onSubmit (e.g. external editor handoff). */
+  closeOnSubmit?: boolean;
 };
 
 export type ManagedTab = ManagedListTab | ManagedSearchTab | ManagedPromptTab;
@@ -657,8 +659,14 @@ export class TuiApp {
     if (!this.renderer) return;
     await this.renderer.suspend();
     try {
+      // shell:true lets $EDITOR carry flags ("code -w"), but then the path
+      // must be quoted or spaces/metacharacters split into extra arguments.
+      const quoted = `'${path.replaceAll("'", `'\\''`)}'`;
       const code = await new Promise<number | null>((resolve, reject) => {
-        const child = spawn(editorCommand, [path], { stdio: "inherit", shell: true });
+        const child = spawn(`${editorCommand} ${quoted}`, {
+          stdio: "inherit",
+          shell: true,
+        });
         child.on("error", reject);
         child.on("close", resolve);
       });
@@ -1742,12 +1750,15 @@ export class TuiApp {
       }
       const value = manager.input?.value.trim() ?? "";
       if (!value) return;
+      if (tab.closeOnSubmit) this.closeManager();
       void Promise.resolve(tab.onSubmit(value)).catch((error: unknown) => {
         this.notify(error instanceof Error ? error.message : String(error), "error");
       });
-      manager.input?.setText("");
-      this.renderManagerBody();
-      this.renderer?.requestRender();
+      if (!tab.closeOnSubmit) {
+        manager.input?.setText("");
+        this.renderManagerBody();
+        this.renderer?.requestRender();
+      }
     }
   }
 

@@ -96,7 +96,7 @@ describe("agents manager", () => {
       const script = join(dir, "editor.sh");
       await writeFile(script, `#!/bin/sh\necho "$1" > "${marker}"\n`, "utf8");
       await chmod(script, 0o755);
-      const target = join(dir, "x.md");
+      const target = join(dir, "has space.md");
       const { test, app, transitions } = await makeApp();
       await app.editFile(target, script);
       expect((await readFile(marker, "utf8")).trim()).toBe(target);
@@ -109,6 +109,38 @@ describe("agents manager", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("closeOnSubmit closes the popup before the submit action", async () => {
+    const { test, app } = await makeApp();
+    const order: string[] = [];
+    const done = app.manageTabs("Agents", [
+      { kind: "list", id: "agents", title: "Agents", items: items.map((i) => ({ ...i })), onCycle: () => undefined },
+      {
+        kind: "prompt",
+        id: "new",
+        title: "New",
+        placeholder: "name",
+        closeOnSubmit: true,
+        onSubmit: () => {
+          order.push("submit");
+        },
+      },
+    ]);
+    await test.flush();
+    test.mockInput.pressTab();
+    await test.flush();
+    await test.mockInput.typeText("reviewer2");
+    await test.flush();
+    test.mockInput.pressEnter();
+    // closeManager resolves the manageTabs promise synchronously, so its
+    // continuation must run before onSubmit's continuation.
+    void done.then(() => order.push("closed"));
+    await done;
+    await test.flush();
+    expect(order).toEqual(["submit", "closed"]);
+    expect(test.captureCharFrame()).not.toContain("[New]");
+    app.stop();
   });
 
   it("editFile resumes even when the editor fails", async () => {

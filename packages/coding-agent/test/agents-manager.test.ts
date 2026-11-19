@@ -4,6 +4,8 @@ import {
   resolveEditorCommand,
   validateAgentName,
 } from "../src/agents-manager.js";
+import { parseFrontmatter } from "../src/resources/skills.js";
+import { builtinAgents } from "../src/resources/agents.js";
 
 describe("agents manager helpers", () => {
   it("validates agent names", () => {
@@ -15,10 +17,23 @@ describe("agents manager helpers", () => {
     expect(validateAgentName("a/b")).toBe(false);
   });
 
-  it("generates the TODO template for a plain new agent", () => {
-    expect(agentTemplate({ name: "reviewer" })).toBe(
-      `---\nname: reviewer\ndescription: TODO: describe when to delegate to this agent\n---\nYou are the reviewer agent. TODO: define this role.\n`,
-    );
+  it("generates a loadable TODO template for a plain new agent", () => {
+    const text = agentTemplate({ name: "reviewer" });
+    expect(text).toContain("name: reviewer");
+    expect(text.trimEnd().endsWith("You are the reviewer agent. TODO: define this role.")).toBe(true);
+    // The template must round-trip through the real frontmatter parser:
+    // an unquoted "TODO: …" is invalid YAML and the loader would skip it.
+    const { meta, body } = parseFrontmatter(text);
+    expect(meta["description"]).toBe("TODO: describe when to delegate to this agent");
+    expect(body.trim()).toBe("You are the reviewer agent. TODO: define this role.");
+  });
+
+  it("builtin override templates round-trip through the loader parser", () => {
+    for (const def of builtinAgents()) {
+      const { meta } = parseFrontmatter(agentTemplate(def));
+      expect(meta["description"]).toBe(def.description);
+      expect(meta["name"]).toBe(def.name);
+    }
   });
 
   it("pre-fills builtin fields when overriding", () => {
@@ -29,9 +44,10 @@ describe("agents manager helpers", () => {
       model: "anthropic/claude",
       prompt: "You are a read-only exploration agent.",
     });
-    expect(text).toContain("description: Read-only exploration");
-    expect(text).toContain("tools: [read, grep]");
-    expect(text).toContain("model: anthropic/claude");
+    const { meta } = parseFrontmatter(text);
+    expect(meta["description"]).toBe("Read-only exploration");
+    expect(meta["tools"]).toEqual(["read", "grep"]);
+    expect(meta["model"]).toBe("anthropic/claude");
     expect(text.trimEnd().endsWith("You are a read-only exploration agent.")).toBe(true);
     expect(text).not.toContain("TODO");
   });
