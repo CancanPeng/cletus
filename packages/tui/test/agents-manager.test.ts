@@ -53,7 +53,10 @@ describe("agents manager", () => {
         id: "agents",
         title: "Agents",
         items: items.map((i) => ({ ...i })),
-        onOpen: (item) => opened.push(item.id),
+        onCycle: () => undefined,
+        onOpen: (item) => {
+          opened.push(item.id);
+        },
       },
     ]);
     await test.flush();
@@ -70,7 +73,13 @@ describe("agents manager", () => {
   it("Enter without onOpen still closes the popup", async () => {
     const { test, app } = await makeApp();
     const done = app.manageTabs("Agents", [
-      { kind: "list", id: "agents", title: "Agents", items: items.map((i) => ({ ...i })) },
+      {
+        kind: "list",
+        id: "agents",
+        title: "Agents",
+        items: items.map((i) => ({ ...i })),
+        onCycle: () => undefined,
+      },
     ]);
     await test.flush();
     test.mockInput.pressEnter();
